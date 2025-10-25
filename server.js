@@ -14,6 +14,7 @@ const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const wishlistRoutes = require('./routes/wishlistRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
+const healthRoutes = require('./routes/healthRoutes');
 const passport = require('./config/passport');
  
 // Initialize express app
@@ -71,6 +72,7 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/wishlist', wishlistRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/health', healthRoutes);
  
 // Error handler middleware (must be last)
 app.use(errorHandler);
