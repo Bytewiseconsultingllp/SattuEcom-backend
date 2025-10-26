@@ -64,6 +64,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Store current refresh token (rotating refresh tokens)
+    refreshToken: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

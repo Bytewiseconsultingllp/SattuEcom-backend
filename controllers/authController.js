@@ -1,9 +1,66 @@
 const User = require('../models/User');
 const OTP = require('../models/OTP');
-const { generateToken } = require('../middleware/auth');
+const jwt = require('jsonwebtoken');
+const { generateToken, generateRefreshToken } = require('../middleware/auth');
 const { sendOTPEmail } = require('../utils/emailService');
 const generateOTP = require('../utils/generateOTP');
  
+/**
+ * @desc    Refresh access token using refresh token
+ * @route   POST /api/auth/refresh-token
+ * @access  Public
+ */
+const refreshToken = async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ success: false, message: 'Refresh token is required' });
+    }
+
+    // Verify refresh token
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET);
+    } catch (err) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+    }
+
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ success: false, message: 'User account is deactivated' });
+    }
+
+    // Ensure the refresh token matches the one stored (rotating)
+    if (!user.refreshToken || user.refreshToken !== refreshToken) {
+      return res.status(401).json({ success: false, message: 'Refresh token mismatch' });
+    }
+
+    // Generate new tokens
+    const newToken = generateToken(user._id);
+    const newRefreshToken = generateRefreshToken(user._id);
+
+    // Save new refresh token
+    user.refreshToken = newRefreshToken;
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Token refreshed',
+      data: {
+        token: newToken,
+        refreshToken: newRefreshToken,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+  }
+};
 /**
 * @desc    Register a new user (Step 1 - Send OTP)
 * @route   POST /api/auth/register
@@ -12,7 +69,6 @@ const generateOTP = require('../utils/generateOTP');
 const register = async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
- 
     // Validate input
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -69,6 +125,71 @@ const register = async (req, res) => {
 };
  
 /**
+ * @desc    Resend OTP for a given email and type (registration, login, password_reset)
+ * @route   POST /api/auth/resend-otp
+ * @access  Public
+ */
+const resendOTP = async (req, res) => {
+  try {
+    const { email, type } = req.body;
+
+    // Validate input
+    if (!email || !type) {
+      return res.status(400).json({ success: false, message: 'Please provide email and type' });
+    }
+
+    const allowedTypes = ['registration', 'login', 'password_reset'];
+    if (!allowedTypes.includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid type. Must be one of registration, login, password_reset' });
+    }
+
+    // For login and password_reset ensure user exists
+    if (type === 'login' || type === 'password_reset') {
+      const user = await User.findOne({ email });
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'No user found with this email' });
+      }
+      if (!user.isActive) {
+        return res.status(403).json({ success: false, message: 'Account is deactivated' });
+      }
+    }
+
+    // Rate limit: avoid frequent resends
+    const resendIntervalSeconds = parseInt(process.env.OTP_RESEND_INTERVAL_SECONDS || '60', 10);
+    const recent = await OTP.findOne({ email, type, isUsed: false }).sort({ createdAt: -1 });
+    if (recent) {
+      const ageMs = Date.now() - new Date(recent.createdAt).getTime();
+      if (ageMs < resendIntervalSeconds * 1000) {
+        const wait = Math.ceil((resendIntervalSeconds * 1000 - ageMs) / 1000);
+        return res.status(429).json({ success: false, message: `Please wait ${wait} seconds before requesting a new OTP` });
+      }
+    }
+
+    // Generate new OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + (process.env.OTP_EXPIRE_MINUTES || 10) * 60 * 1000);
+
+    // Delete existing (unused) OTPs for this email and type
+    await OTP.deleteMany({ email, type });
+
+    // Save new OTP
+    await OTP.create({ email, otp, type, expiresAt: otpExpiry });
+
+    // Send email
+    await sendOTPEmail(email, otp, type);
+
+    return res.status(200).json({
+      success: true,
+      message: 'OTP resent to your email',
+      data: { email, expiresIn: `${process.env.OTP_EXPIRE_MINUTES || 10} minutes` },
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ success: false, message: error.message || 'Server error' });
+  }
+};
+
+/**
 * @desc    Verify OTP and complete registration (Step 2)
 * @route   POST /api/auth/verify-registration
 * @access  Public
@@ -123,8 +244,13 @@ const verifyRegistration = async (req, res) => {
     otpRecord.isUsed = true;
     await otpRecord.save();
  
-    // Generate token
-    const token = generateToken(user._id);
+  // Generate token and refresh token
+  const token = generateToken(user._id);
+  const refreshToken = generateRefreshToken(user._id);
+
+  // Save refresh token to user (rotating)
+  user.refreshToken = refreshToken;
+  await user.save();
  
     res.status(201).json({
       success: true,
@@ -139,6 +265,7 @@ const verifyRegistration = async (req, res) => {
           isVerified: user.isVerified,
         },
         token,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -276,8 +403,13 @@ const verifyLogin = async (req, res) => {
     otpRecord.isUsed = true;
     await otpRecord.save();
  
-    // Generate token
+    // Generate token and refresh token
     const token = generateToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
+
+    // Save refresh token to user (rotating)
+    user.refreshToken = refreshToken;
+    await user.save();
  
     res.status(200).json({
       success: true,
@@ -292,6 +424,7 @@ const verifyLogin = async (req, res) => {
           isVerified: user.isVerified,
         },
         token,
+        refreshToken,
       },
     });
   } catch (error) {
@@ -475,5 +608,7 @@ module.exports = {
   verifyLogin,
   forgotPassword,
   resetPassword,
+  resendOTP,
   getProfile,
+  refreshToken,
 };

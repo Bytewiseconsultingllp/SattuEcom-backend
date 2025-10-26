@@ -6,8 +6,10 @@ const {
   login,
   verifyLogin,
   forgotPassword,
+  resendOTP,
   resetPassword,
   getProfile,
+  refreshToken,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
  
@@ -275,6 +277,20 @@ router.post('/verify-login', verifyLogin);
 *               $ref: '#/components/schemas/ErrorResponse'
 */
 router.post('/forgot-password', forgotPassword);
+
+/**
+ * Resend OTP
+ * POST /api/auth/resend-otp
+ * body: { email, type }
+ */
+router.post('/resend-otp', resendOTP);
+ 
+/**
+ * Refresh access token
+ * POST /api/auth/refresh-token
+ * body: { refreshToken }
+ */
+router.post('/refresh-token', refreshToken);
  
 /**
 * @swagger

@@ -75,5 +75,14 @@ const generateToken = (id) => {
     expiresIn: process.env.JWT_EXPIRE || '7d',
   });
 };
+
+/**
+ * Generate refresh token (longer lived)
+ */
+const generateRefreshToken = (id) => {
+  return jwt.sign({ id }, process.env.REFRESH_TOKEN_SECRET || process.env.JWT_SECRET, {
+    expiresIn: process.env.REFRESH_TOKEN_EXPIRE || '30d',
+  });
+};
  
-module.exports = { protect, admin, generateToken };
+module.exports = { protect, admin, generateToken, generateRefreshToken };
