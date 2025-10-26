@@ -319,7 +319,36 @@ const login = async (req, res) => {
         message: 'Account is deactivated',
       });
     }
- 
+
+    // For admin users, skip OTP and return tokens directly
+    if (user.role === 'admin') {
+      // Generate tokens
+      const token = generateToken(user._id);
+      const refreshToken = generateRefreshToken(user._id);
+
+      // Save refresh token
+      user.refreshToken = refreshToken;
+      await user.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Admin login successful',
+        data: {
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            phone: user.phone,
+            role: user.role,
+            isVerified: user.isVerified,
+          },
+          token,
+          refreshToken,
+        },
+      });
+    }
+
+    // For non-admin users, continue with OTP flow
     // Generate OTP
     const otp = generateOTP();
     const otpExpiry = new Date(
