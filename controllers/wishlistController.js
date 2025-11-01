@@ -5,21 +5,37 @@ const Product = require('../models/Product');
 * Get all wishlist items for a user with product details
 * Matches Supabase getWishlistItems function
 */
+// controllers/wishlistController.js
 exports.getWishlistItems = async (req, res, next) => {
   try {
     const userId = req.user._id;
- 
+
     const wishlistItems = await WishlistItem.find({ user_id: userId })
-      .populate('product_id')
+      .populate({
+        path: 'product_id',
+        select: 'name description price original_price category image_url in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
+      })
       .sort({ created_at: -1 })
       .lean();
- 
-    // Format to match Supabase structure
-    const formattedItems = wishlistItems.map((item) => ({
+
+    // Filter out entries where product is missing (dangling references)
+    const valid = wishlistItems.filter(item => item.product_id);
+
+    // Optional: clean up orphans in the background (non-blocking)
+    const orphanIds = wishlistItems
+      .filter(item => !item.product_id)
+      .map(item => item._id);
+    if (orphanIds.length) {
+      // Do not await; log errors only
+      WishlistItem.deleteMany({ _id: { $in: orphanIds } })
+        .catch(() => {/* swallow cleanup errors */});
+    }
+
+    const formattedItems = valid.map((item) => ({
       id: item._id.toString(),
       user_id: item.user_id.toString(),
       product_id: item.product_id._id.toString(),
-      created_at: item.created_at,
+      created_at: item.created_at, // keep your schema naming
       product: {
         id: item.product_id._id.toString(),
         name: item.product_id.name,
@@ -38,8 +54,8 @@ exports.getWishlistItems = async (req, res, next) => {
         updated_at: item.product_id.updatedAt,
       },
     }));
- 
-    res.status(200).json({
+
+    return res.status(200).json({
       success: true,
       count: formattedItems.length,
       data: formattedItems,

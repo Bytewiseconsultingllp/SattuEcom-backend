@@ -5,38 +5,49 @@ const Product = require('../models/Product');
 * Get all cart items for a user with product details
 * Matches Supabase getCartItems function
 */
+
 exports.getCartItems = async (req, res, next) => {
   try {
-    const userId = req.user._id; // From protect middleware
- 
-    const cartItems = await CartItem.find({ user_id: userId })
-      .populate('product_id')
-      .sort({ createdAt: -1 });
- 
-    // Transform to match Supabase format with nested product object
-    const formattedItems = cartItems.map((item) => {
-      const itemObj = item.toObject();
-      return {
-        id: itemObj.id,
-        user_id: itemObj.user_id,
-        product_id: itemObj.product_id.id,
-        quantity: itemObj.quantity,
-        created_at: itemObj.created_at,
-        updated_at: itemObj.updated_at,
-        product: itemObj.product_id, // Nested product object
-      };
-    });
- 
-    res.status(200).json({
-      success: true,
-      count: formattedItems.length,
-      data: formattedItems,
-    });
-  } catch (error) {
-    next(error);
+    const userId = req.user._id;
+
+    const items = await CartItem.find({ user_id: userId })
+      .populate({
+        path: 'product_id',
+        select: 'name price image_url in_stock createdAt updatedAt',
+      })
+      .sort({ created_at: -1 })
+      .lean();
+
+    // Filter out orphans (where product was deleted)
+    const valid = items.filter(it => it.product_id);
+    const orphans = items.filter(it => !it.product_id).map(it => it._id);
+    if (orphans.length) {
+      // Fire-and-forget cleanup
+      CartItem.deleteMany({ _id: { $in: orphans } }).catch(() => {});
+    }
+
+    const data = valid.map(it => ({
+      id: it._id.toString(),
+      user_id: it.user_id.toString(),
+      product_id: it.product_id._id.toString(),
+      quantity: it.quantity,
+      created_at: it.created_at, // if your schema uses created_at, keep this
+      product: {
+        id: it.product_id._id.toString(),
+        name: it.product_id.name,
+        price: it.product_id.price,
+        image_url: it.product_id.image_url,
+        in_stock: it.product_id.in_stock,
+        created_at: it.product_id.createdAt,
+        updated_at: it.product_id.updatedAt,
+      },
+    }));
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (err) {
+    next(err);
   }
 };
- 
 /**
 * Add item to cart or update quantity if exists
 * Matches Supabase addToCart function

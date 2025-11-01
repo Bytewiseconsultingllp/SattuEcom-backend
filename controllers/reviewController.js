@@ -1,72 +1,182 @@
 const Review = require('../models/Review');
 const Product = require('../models/Product');
+const mongoose = require('mongoose');
  
 /**
 * Helper function to update product rating and review count
 * Matches Supabase updateProductRating function
 */
+// const updateProductRating = async (productId) => {
+//   try {
+//     const reviews = await Review.find({ product_id: productId }).select('rating');
+ 
+//     if (reviews && reviews.length > 0) {
+//       const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
+ 
+//       await Product.findByIdAndUpdate(productId, {
+//         rating: Number(avgRating.toFixed(1)),
+//         reviews_count: reviews.length,
+//       });
+//     } else {
+//       // No reviews, reset rating
+//       await Product.findByIdAndUpdate(productId, {
+//         rating: 0,
+//         reviews_count: 0,
+//       });
+//     }
+//   } catch (error) {
+//     console.error('Error updating product rating:', error);
+//   }
+// };
+// controllers/reviewController.js
 const updateProductRating = async (productId) => {
   try {
-    const reviews = await Review.find({ product_id: productId }).select('rating');
- 
-    if (reviews && reviews.length > 0) {
-      const avgRating = reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length;
- 
+    const pid = new mongoose.Types.ObjectId(productId);
+    const agg = await Review.aggregate([
+      { $match: { product_id: pid } },
+      { $group: { _id: null, avg: { $avg: '$rating' }, count: { $sum: 1 } } },
+    ]);
+
+    if (agg.length) {
+      const avgRating = Number(agg[0].avg.toFixed(1));
       await Product.findByIdAndUpdate(productId, {
-        rating: Number(avgRating.toFixed(1)),
-        reviews_count: reviews.length,
+        rating: avgRating,
+        reviews_count: agg[0].count,
       });
     } else {
-      // No reviews, reset rating
-      await Product.findByIdAndUpdate(productId, {
-        rating: 0,
-        reviews_count: 0,
-      });
+      await Product.findByIdAndUpdate(productId, { rating: 0, reviews_count: 0 });
     }
   } catch (error) {
     console.error('Error updating product rating:', error);
   }
 };
- 
 /**
 * Get all reviews for a product with user details
 * Matches Supabase getProductReviews function
 */
+// exports.getProductReviews = async (req, res, next) => {
+//   try {
+//     const productId = req.params.productId;
+ 
+//     const reviews = await Review.find({ product_id: productId })
+//       .populate('user_id', 'name')
+//       .sort({ createdAt: -1 })
+//       .lean();
+ 
+//     // Format to match Supabase structure
+//     const formattedReviews = reviews.map((review) => ({
+//       id: review._id.toString(),
+//       user_id: review.user_id._id.toString(),
+//       product_id: review.product_id.toString(),
+//       rating: review.rating,
+//       comment: review.comment,
+//       created_at: review.createdAt,
+//       updated_at: review.updatedAt,
+//       user: {
+//         full_name: review.user_id.name,
+//       },
+//     }));
+ 
+//     res.status(200).json({
+//       success: true,
+//       count: formattedReviews.length,
+//       data: formattedReviews,
+//     });
+//   } catch (error) {
+//     if (error.kind === 'ObjectId') {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Product not found',
+//       });
+//     }
+//     next(error);
+//   }
+// };
+// controllers/reviewController.js
+// exports.getProductReviews = async (req, res, next) => {
+//   try {
+//     const productId = req.params.productId;
+
+//     // NEW: pagination and filter
+//     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+//     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+//     const ratingFilter = req.query.rating ? parseInt(req.query.rating, 10) : undefined;
+
+//     const query = { product_id: productId };
+//     if ([1,2,3,4,5].includes(ratingFilter)) {
+//       query.rating = ratingFilter;
+//     }
+
+//     const [reviews, total] = await Promise.all([
+//       Review.find(query)
+//         .populate('user_id', 'name')
+//         .sort({ createdAt: -1 })
+//         .skip((page - 1) * limit)
+//         .limit(limit)
+//         .lean(),
+//       Review.countDocuments(query),
+//     ]);
+
+//     const formattedReviews = reviews.map((review) => ({
+//       id: review._id.toString(),
+//       user_id: review.user_id._id.toString(),
+//       product_id: review.product_id.toString(),
+//       rating: review.rating,
+//       comment: review.comment,
+//       created_at: review.createdAt,
+//       updated_at: review.updatedAt,
+//       user: { full_name: review.user_id.name },
+//     }));
+
+//     res.status(200).json({
+//       success: true,
+//       count: total,
+//       page,
+//       limit,
+//       data: formattedReviews,
+//     });
+//   } catch (error) {
+//     if (error.kind === 'ObjectId') {
+//       return res.status(404).json({ success: false, message: 'Product not found' });
+//     }
+//     next(error);
+//   }
+// };
 exports.getProductReviews = async (req, res, next) => {
   try {
     const productId = req.params.productId;
- 
-    const reviews = await Review.find({ product_id: productId })
-      .populate('user_id', 'name')
-      .sort({ createdAt: -1 })
-      .lean();
- 
-    // Format to match Supabase structure
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const ratingFilter = req.query.rating ? parseInt(req.query.rating, 10) : undefined;
+
+    const query = { product_id: productId };
+    if ([1,2,3,4,5].includes(ratingFilter)) query.rating = ratingFilter;
+
+    const [reviews, total] = await Promise.all([
+      Review.find(query)
+        .populate('user_id', 'name')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Review.countDocuments(query),
+    ]);
+
     const formattedReviews = reviews.map((review) => ({
       id: review._id.toString(),
       user_id: review.user_id._id.toString(),
       product_id: review.product_id.toString(),
       rating: review.rating,
       comment: review.comment,
+      images: review.images || [],
       created_at: review.createdAt,
       updated_at: review.updatedAt,
-      user: {
-        full_name: review.user_id.name,
-      },
+      user: { full_name: review.user_id.name },
     }));
- 
-    res.status(200).json({
-      success: true,
-      count: formattedReviews.length,
-      data: formattedReviews,
-    });
+
+    res.status(200).json({ success: true, count: total, page, limit, data: formattedReviews });
   } catch (error) {
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found',
-      });
-    }
+    if (error.kind === 'ObjectId') return res.status(404).json({ success: false, message: 'Product not found' });
     next(error);
   }
 };
@@ -74,21 +184,62 @@ exports.getProductReviews = async (req, res, next) => {
 /**
 * Get all reviews by a user
 */
+// exports.getUserReviews = async (req, res, next) => {
+//   try {
+//     const userId = req.user._id;
+ 
+//     const reviews = await Review.find({ user_id: userId })
+//       .populate('product_id', 'name image_url')
+//       .sort({ createdAt: -1 })
+//       .lean();
+ 
+//     const formattedReviews = reviews.map((review) => ({
+//       id: review._id.toString(),
+//       user_id: review.user_id.toString(),
+//       product_id: review.product_id._id.toString(),
+//       rating: review.rating,
+//       comment: review.comment,
+//       created_at: review.createdAt,
+//       updated_at: review.updatedAt,
+//       product: {
+//         name: review.product_id.name,
+//         image_url: review.product_id.image_url,
+//       },
+//     }));
+ 
+//     res.status(200).json({
+//       success: true,
+//       count: formattedReviews.length,
+//       data: formattedReviews,
+//     });
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 exports.getUserReviews = async (req, res, next) => {
   try {
     const userId = req.user._id;
- 
-    const reviews = await Review.find({ user_id: userId })
-      .populate('product_id', 'name image_url')
-      .sort({ createdAt: -1 })
-      .lean();
- 
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+
+    const [reviews, total] = await Promise.all([
+      Review.find({ user_id: userId })
+        .populate('product_id', 'name image_url')
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Review.countDocuments({ user_id: userId }),
+    ]);
+
     const formattedReviews = reviews.map((review) => ({
       id: review._id.toString(),
       user_id: review.user_id.toString(),
       product_id: review.product_id._id.toString(),
       rating: review.rating,
       comment: review.comment,
+      images: review.images || [],                   // ← include images
       created_at: review.createdAt,
       updated_at: review.updatedAt,
       product: {
@@ -96,10 +247,12 @@ exports.getUserReviews = async (req, res, next) => {
         image_url: review.product_id.image_url,
       },
     }));
- 
+
     res.status(200).json({
       success: true,
-      count: formattedReviews.length,
+      count: total,
+      page,
+      limit,
       data: formattedReviews,
     });
   } catch (error) {
@@ -111,163 +264,275 @@ exports.getUserReviews = async (req, res, next) => {
 * Create a new review
 * Matches Supabase createReview function
 */
+// exports.createReview = async (req, res, next) => {
+//   try {
+//     const userId = req.user._id;
+//     const { product_id, rating, comment } = req.body;
+ 
+//     if (!product_id || !rating) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'Product ID and rating are required',
+//       });
+//     }
+ 
+//     // Verify product exists
+//     const product = await Product.findById(product_id);
+//     if (!product) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Product not found',
+//       });
+//     }
+ 
+//     // Check if user already reviewed this product
+//     const existingReview = await Review.findOne({
+//       user_id: userId,
+//       product_id: product_id,
+//     });
+ 
+//     if (existingReview) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'You have already reviewed this product',
+//       });
+//     }
+ 
+//     // Create review
+//     const review = await Review.create({
+//       user_id: userId,
+//       product_id,
+//       rating,
+//       comment,
+//     });
+ 
+//     // Update product rating
+//     await updateProductRating(product_id);
+ 
+//     // Populate user details
+//     await review.populate('user_id', 'name');
+ 
+//     // Format response
+//     const formattedReview = {
+//       id: review._id.toString(),
+//       user_id: review.user_id._id.toString(),
+//       product_id: review.product_id.toString(),
+//       rating: review.rating,
+//       comment: review.comment,
+//       created_at: review.createdAt,
+//       updated_at: review.updatedAt,
+//       user: {
+//         full_name: review.user_id.name,
+//       },
+//     };
+ 
+//     res.status(201).json({
+//       success: true,
+//       data: formattedReview,
+//       message: 'Review created successfully',
+//     });
+//   } catch (error) {
+//     if (error.code === 11000) {
+//       return res.status(400).json({
+//         success: false,
+//         message: 'You have already reviewed this product',
+//       });
+//     }
+//     if (error.name === 'ValidationError') {
+//       const messages = Object.values(error.errors).map((err) => err.message);
+//       return res.status(400).json({
+//         success: false,
+//         message: messages.join(', '),
+//       });
+//     }
+//     next(error);
+//   }
+// };
+function isValidBase64Image(s) {
+  return typeof s === 'string' && s.startsWith('data:image/') && s.includes(';base64,');
+}
+
 exports.createReview = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { product_id, rating, comment } = req.body;
- 
-    if (!product_id || !rating) {
-      return res.status(400).json({
-        success: false,
-        message: 'Product ID and rating are required',
-      });
+    const { product_id, rating, comment, images } = req.body;
+
+    if (!product_id || rating == null) {
+      return res.status(400).json({ success: false, message: 'Product ID and rating are required' });
     }
- 
-    // Verify product exists
+
+    // optional hardening
+    const ratingNum = Number(rating);
+    if (![1,2,3,4,5].includes(ratingNum)) {
+      return res.status(400).json({ success: false, message: 'Rating must be an integer 1-5' });
+    }
+
     const product = await Product.findById(product_id);
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found',
-      });
-    }
- 
-    // Check if user already reviewed this product
-    const existingReview = await Review.findOne({
-      user_id: userId,
-      product_id: product_id,
-    });
- 
-    if (existingReview) {
-      return res.status(400).json({
-        success: false,
-        message: 'You have already reviewed this product',
-      });
-    }
- 
-    // Create review
+    if (!product) return res.status(404).json({ success: false, message: 'Product not found' });
+
+    const existingReview = await Review.findOne({ user_id: userId, product_id });
+    if (existingReview) return res.status(400).json({ success: false, message: 'You have already reviewed this product' });
+
+    const MAX_IMAGES = 6;
+    const imgs = Array.isArray(images) ? images : [];
+    const validImages = imgs.filter(isValidBase64Image).slice(0, MAX_IMAGES);
+
+    console.log("about to create the review ")
     const review = await Review.create({
       user_id: userId,
       product_id,
-      rating,
+      rating: ratingNum,
       comment,
+      images: validImages,
     });
- 
-    // Update product rating
+
+    console.log("created the review ")
+    console.log("about to update the rating  ")
     await updateProductRating(product_id);
- 
-    // Populate user details
     await review.populate('user_id', 'name');
- 
-    // Format response
-    const formattedReview = {
+
+    const data = {
       id: review._id.toString(),
       user_id: review.user_id._id.toString(),
       product_id: review.product_id.toString(),
       rating: review.rating,
       comment: review.comment,
+      images: review.images || [],
       created_at: review.createdAt,
       updated_at: review.updatedAt,
-      user: {
-        full_name: review.user_id.name,
-      },
+      user: { full_name: review.user_id.name },
     };
- 
-    res.status(201).json({
-      success: true,
-      data: formattedReview,
-      message: 'Review created successfully',
-    });
+
+    res.status(201).json({ success: true, data, message: 'Review created successfully' });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'You have already reviewed this product',
-      });
-    }
+    if (error.code === 11000) return res.status(400).json({ success: false, message: 'You have already reviewed this product' });
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(', '),
-      });
+      return res.status(400).json({ success: false, message: messages.join(', ') });
     }
     next(error);
   }
 };
- 
 /**
 * Update a review
 * Matches Supabase updateReview function
 */
+// exports.updateReview = async (req, res, next) => {
+//   try {
+//     const userId = req.user._id;
+//     const reviewId = req.params.id;
+//     const { rating, comment } = req.body;
+ 
+//     // Find review and ensure it belongs to user
+//     const review = await Review.findOne({
+//       _id: reviewId,
+//       user_id: userId,
+//     });
+ 
+//     if (!review) {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found',
+//       });
+//     }
+ 
+//     // Update fields
+//     if (rating !== undefined) review.rating = rating;
+//     if (comment !== undefined) review.comment = comment;
+ 
+//     await review.save();
+ 
+//     // Update product rating
+//     await updateProductRating(review.product_id);
+ 
+//     // Populate user details
+//     await review.populate('user_id', 'name');
+ 
+//     // Format response
+//     const formattedReview = {
+//       id: review._id.toString(),
+//       user_id: review.user_id._id.toString(),
+//       product_id: review.product_id.toString(),
+//       rating: review.rating,
+//       comment: review.comment,
+//       created_at: review.createdAt,
+//       updated_at: review.updatedAt,
+//       user: {
+//         full_name: review.user_id.name,
+//       },
+//     };
+ 
+//     res.status(200).json({
+//       success: true,
+//       data: formattedReview,
+//       message: 'Review updated successfully',
+//     });
+//   } catch (error) {
+//     if (error.name === 'ValidationError') {
+//       const messages = Object.values(error.errors).map((err) => err.message);
+//       return res.status(400).json({
+//         success: false,
+//         message: messages.join(', '),
+//       });
+//     }
+//     if (error.kind === 'ObjectId') {
+//       return res.status(404).json({
+//         success: false,
+//         message: 'Review not found',
+//       });
+//     }
+//     next(error);
+//   }
+// };
 exports.updateReview = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const reviewId = req.params.id;
-    const { rating, comment } = req.body;
- 
-    // Find review and ensure it belongs to user
-    const review = await Review.findOne({
-      _id: reviewId,
-      user_id: userId,
-    });
- 
-    if (!review) {
-      return res.status(404).json({
-        success: false,
-        message: 'Review not found',
-      });
-    }
- 
-    // Update fields
+    const { rating, comment, images, image_action } = req.body;
+
+    const review = await Review.findOne({ _id: reviewId, user_id: userId });
+    if (!review) return res.status(404).json({ success: false, message: 'Review not found' });
+
     if (rating !== undefined) review.rating = rating;
     if (comment !== undefined) review.comment = comment;
- 
+
+    const MAX_IMAGES = 6;
+    if (Array.isArray(images)) {
+      const validImages = images.filter(isValidBase64Image);
+      if (image_action === 'append') {
+        const combined = [...(review.images || []), ...validImages];
+        review.images = combined.slice(0, MAX_IMAGES);
+      } else {
+        review.images = validImages.slice(0, MAX_IMAGES); // default replace
+      }
+    }
+
     await review.save();
- 
-    // Update product rating
     await updateProductRating(review.product_id);
- 
-    // Populate user details
     await review.populate('user_id', 'name');
- 
-    // Format response
-    const formattedReview = {
+
+    const data = {
       id: review._id.toString(),
       user_id: review.user_id._id.toString(),
       product_id: review.product_id.toString(),
       rating: review.rating,
       comment: review.comment,
+      images: review.images || [],
       created_at: review.createdAt,
       updated_at: review.updatedAt,
-      user: {
-        full_name: review.user_id.name,
-      },
+      user: { full_name: review.user_id.name },
     };
- 
-    res.status(200).json({
-      success: true,
-      data: formattedReview,
-      message: 'Review updated successfully',
-    });
+
+    res.status(200).json({ success: true, data, message: 'Review updated successfully' });
   } catch (error) {
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map((err) => err.message);
-      return res.status(400).json({
-        success: false,
-        message: messages.join(', '),
-      });
+      return res.status(400).json({ success: false, message: messages.join(', ') });
     }
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({
-        success: false,
-        message: 'Review not found',
-      });
-    }
+    if (error.kind === 'ObjectId') return res.status(404).json({ success: false, message: 'Review not found' });
     next(error);
   }
 };
- 
 /**
 * Delete a review
 * Matches Supabase deleteReview function
@@ -337,6 +602,31 @@ exports.hasUserReviewed = async (req, res, next) => {
       },
     });
   } catch (error) {
+    next(error);
+  }
+};
+exports.getProductReviewSummary = async (req, res, next) => {
+  try {
+    const productId = req.params.productId;
+    const pid = new mongoose.Types.ObjectId(productId);
+
+    const grouped = await Review.aggregate([
+      { $match: { product_id: pid } },
+      { $group: { _id: '$rating', count: { $sum: 1 } } },
+    ]);
+
+    const breakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let total = 0, weighted = 0;
+    for (const g of grouped) {
+      breakdown[g._id] = g.count;
+      total += g.count;
+      weighted += g._id * g.count;
+    }
+    const average = total ? Number((weighted / total).toFixed(1)) : 0;
+
+    res.status(200).json({ success: true, data: { average, count: total, breakdown } });
+  } catch (error) {
+    if (error.kind === 'ObjectId') return res.status(404).json({ success: false, message: 'Product not found' });
     next(error);
   }
 };

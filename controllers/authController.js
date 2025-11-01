@@ -600,14 +600,32 @@ const resetPassword = async (req, res) => {
 };
  
 /**
-* @desc    Get user profile
-* @route   GET /api/auth/profile
-* @access  Private
-*/
-const getProfile = async (req, res) => {
+ * @desc    Get user profile
+ * @route   GET /api/auth/profile/:userId
+ * @access  Private
+ */
+const profile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
- 
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required in URL params'
+      });
+    }
+
+    const user = await User.findById(userId)
+      .select('-password')
+      .populate('addresses');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
     res.status(200).json({
       success: true,
       data: {
@@ -618,6 +636,7 @@ const getProfile = async (req, res) => {
         role: user.role,
         isVerified: user.isVerified,
         address: user.address,
+        addresses: user.addresses || [],
         createdAt: user.createdAt,
       },
     });
@@ -638,6 +657,6 @@ module.exports = {
   forgotPassword,
   resetPassword,
   resendOTP,
-  getProfile,
+  profile,
   refreshToken,
 };

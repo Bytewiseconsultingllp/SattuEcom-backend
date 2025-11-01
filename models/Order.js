@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
- 
+
 const orderSchema = new mongoose.Schema(
   {
     user_id: {
@@ -27,6 +27,11 @@ const orderSchema = new mongoose.Schema(
       ref: 'Address',
       required: [true, 'Shipping address is required'],
     },
+
+    // NEW: cancellation metadata
+    cancellation_reason: { type: String, default: '' },
+    cancelled_at: { type: Date },
+    cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   },
   {
     timestamps: true,
@@ -58,24 +63,23 @@ const orderSchema = new mongoose.Schema(
     },
   }
 );
- 
-// Virtual for order_items
+
+// Virtuals
 orderSchema.virtual('order_items', {
   ref: 'OrderItem',
   localField: '_id',
   foreignField: 'order_id',
 });
- 
-// Virtual for shipping_address
+
 orderSchema.virtual('shipping_address', {
   ref: 'Address',
   localField: 'shipping_address_id',
   foreignField: '_id',
   justOne: true,
 });
- 
-// Indexes for faster queries
-orderSchema.index({ user_id: 1, created_at: -1 });
+
+// Indexes
+orderSchema.index({ user_id: 1, createdAt: -1 }); // FIX: use createdAt, not created_at
 orderSchema.index({ status: 1 });
- 
+
 module.exports = mongoose.model('Order', orderSchema);

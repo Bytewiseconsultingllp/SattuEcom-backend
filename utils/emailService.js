@@ -101,6 +101,86 @@ const sendOTPEmail = async (email, otp, type) => {
     throw new Error('Failed to send email');
   }
 };
+
+
+function renderOrderHtml(order, extra = '') {
+  const items = (order.order_items || []).map((it) => {
+    const name = it?.product?.name || it.product_id;
+    const qty = it.quantity || 0;
+    const price = it.price || 0;
+    const subtotal = qty * price;
+    return `
+      <tr>
+        <td style="padding:6px 8px;border:1px solid #eee">${name}</td>
+        <td style="padding:6px 8px;border:1px solid #eee">${qty}</td>
+        <td style="padding:6px 8px;border:1px solid #eee">₹${price}</td>
+        <td style="padding:6px 8px;border:1px solid #eee">₹${subtotal}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const address = order.shipping_address
+    ? `${order.shipping_address.address_line1}${order.shipping_address.address_line2 ? ', ' + order.shipping_address.address_line2 : ''}, ${order.shipping_address.city}, ${order.shipping_address.state} - ${order.shipping_address.postal_code}`
+    : '-';
+
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+      ${extra ? `<div style="margin-bottom:12px">${extra}</div>` : ''}
+      <h2 style="margin:0 0 8px">Order ${order.id}</h2>
+      <p style="margin:0 0 12px;color:#555">Status: <b>${order.status}</b> • Date: ${new Date(order.created_at || order.createdAt || Date.now()).toLocaleString()}</p>
+      <h3 style="margin:16px 0 8px">Items</h3>
+      <table cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;">
+        <thead>
+          <tr>
+            <th style="padding:6px 8px;border:1px solid #eee;text-align:left">Product</th>
+            <th style="padding:6px 8px;border:1px solid #eee;text-align:left">Qty</th>
+            <th style="padding:6px 8px;border:1px solid #eee;text-align:left">Price</th>
+            <th style="padding:6px 8px;border:1px solid #eee;text-align:left">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>${items}</tbody>
+      </table>
+      <h3 style="margin:16px 0 8px">Total: ₹${order.total_amount ?? order.total}</h3>
+      <h3 style="margin:16px 0 8px">Shipping Address</h3>
+      <p style="margin:0;color:#555">${address}</p>
+    </div>
+  `;
+}
+
+async function sendMailSafe({ to, subject, html }) {
+  const from = `"E-commerce" <${process.env.SMTP_USER}>`;
+  try {
+    logger.debug('sending email', { to, subject });
+    const info = await transporter.sendMail({ from, to, subject, html });
+    logger.info('email sent', { to, subject, messageId: info.messageId, response: info.response });
+    return true;
+  } catch (error) {
+    const safeError = { message: error?.message, code: error?.code };
+    logger.error('Error sending email', safeError);
+    throw new Error('Failed to send email');
+  } 
+}
+
+// New: order confirmation to user + admin
+async function sendOrderCreatedEmail(order, userEmail) {
+  const html = renderOrderHtml(order, `<h2 style="margin:0 0 8px;color:#333;">Order Confirmation</h2>`);
+  const admin = process.env.ADMIN_EMAIL;
+  await Promise.all([
+    sendMailSafe({ to: userEmail, subject: `Order Confirmation - ${order.id}`, html }),
+    admin ? sendMailSafe({ to: admin, subject: `New Order - ${order.id}`, html }) : Promise.resolve(),
+  ]);
+}
+
+// New: order cancelled to user + admin with reason
+async function sendOrderCancelledEmail(order, userEmail, reason) {
+  const html = renderOrderHtml(order, `<h2 style="margin:0 0 8px;color:#c1121f;">Order Cancelled</h2><p><b>Reason:</b> ${reason || 'No reason provided'}</p>`);
+  const admin = process.env.ADMIN_EMAIL;
+  await Promise.all([
+    sendMailSafe({ to: userEmail, subject: `Order Cancelled - ${order.id}`, html }),
+    admin ? sendMailSafe({ to: admin, subject: `Order Cancelled - ${order.id}`, html }) : Promise.resolve(),
+  ]);
+}
+
  
-module.exports = { sendOTPEmail };
+module.exports = { sendOTPEmail, sendOrderCreatedEmail, sendOrderCancelledEmail };
  

@@ -54,6 +54,7 @@ const cartItemSchema = new mongoose.Schema(
  
 // Compound index to prevent duplicate items
 cartItemSchema.index({ user_id: 1, product_id: 1 }, { unique: true });
+
  
 module.exports = mongoose.model('CartItem', cartItemSchema);
  

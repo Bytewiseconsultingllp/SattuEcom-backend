@@ -74,6 +74,18 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Virtual for user's addresses (one-to-many)
+userSchema.virtual('addresses', {
+  ref: 'Address', // The model to use
+  localField: '_id', // Find addresses where `localField`
+  foreignField: 'user_id', // is equal to `foreignField`
+  justOne: false,
+});
+
+// Ensure virtuals are included when converting to JSON / Objects
+userSchema.set('toObject', { virtuals: true });
+userSchema.set('toJSON', { virtuals: true });
  
 // Hash password before saving
 userSchema.pre('save', async function (next) {

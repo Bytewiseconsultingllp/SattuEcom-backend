@@ -8,7 +8,7 @@ const {
   forgotPassword,
   resendOTP,
   resetPassword,
-  getProfile,
+  profile,
   refreshToken,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
@@ -361,6 +361,5 @@ router.post('/reset-password', resetPassword);
 *             schema:
 *               $ref: '#/components/schemas/ErrorResponse'
 */
-router.get('/profile', protect, getProfile);
- 
+router.get('/profile/:userId', profile);
 module.exports = router;

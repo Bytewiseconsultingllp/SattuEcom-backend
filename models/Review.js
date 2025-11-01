@@ -23,6 +23,11 @@ const reviewSchema = new mongoose.Schema(
     comment: {
       type: String,
       trim: true,
+      maxLength: 1000
+    },
+     images: {
+      type: [String],
+      default: [],
     },
   },
   {
@@ -66,6 +71,8 @@ reviewSchema.virtual('user', {
  
 // Compound index to ensure one review per user per product
 reviewSchema.index({ user_id: 1, product_id: 1 }, { unique: true });
+
+reviewSchema.index({ product_id: 1, rating: 1 });
  
 // Index for sorting by creation date
 reviewSchema.index({ product_id: 1, createdAt: -1 });

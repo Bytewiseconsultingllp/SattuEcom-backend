@@ -16,6 +16,7 @@ const wishlistRoutes = require('./routes/wishlistRoutes');
 const reviewRoutes = require('./routes/reviewRoutes');
 const healthRoutes = require('./routes/healthRoutes');
 const passport = require('./config/passport');
+const categoryRoutes = require('./routes/categories');
  
 // Initialize express app
 const app = express();
@@ -49,8 +50,8 @@ app.use(
 
 // ✅ Handle preflight requests
 app.options("*", cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({limit:'15mb'}));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
  
 // Session middleware (required for OAuth)
 app.use(
@@ -64,6 +65,9 @@ app.use(
     },
   })
 );
+
+app.use(express.json({ limit: '20mb' }));
+app.use('/api', categoryRoutes);
  
 // Initialize Passport
 app.use(passport.initialize());

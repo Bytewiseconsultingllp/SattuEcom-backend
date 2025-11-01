@@ -29,6 +29,7 @@ const productSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Product image URL is required'],
     },
+    images: { type: [String], default: [] }, // NEW
     in_stock: {
       type: Boolean,
       default: true,
@@ -92,6 +93,8 @@ const productSchema = new mongoose.Schema(
 productSchema.index({ category: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ in_stock: 1 });
-productSchema.index({ created_at: -1 });
+productSchema.index({ createdAt: -1 });
+productSchema.index({ rating: -1 });
+productSchema.index({ reviews_count: -1 });
  
 module.exports = mongoose.model('Product', productSchema);
