@@ -521,6 +521,7 @@ exports.getAllOrders = async (req, res, next) => {
       // Step 6: Format response
       {
         $project: {
+          _id: 0,
           id: { $toString: '$_id' },
           user_id: { $toString: '$user_id' },
           total_amount: 1,
@@ -548,10 +549,7 @@ exports.getAllOrders = async (req, res, next) => {
           user: {
             full_name: { $arrayElemAt: ['$user_details.name', 0] },
             email: { $arrayElemAt: ['$user_details.email', 0] }
-          },
-          _id: 0,
-          products: 0,
-          user_details: 0
+          }
         }
       }
     ]);
