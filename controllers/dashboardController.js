@@ -8,72 +8,80 @@ const Review = require('../models/Review');
 /**
  * Get all dashboard statistics
  * Calculates: Total Revenue = Online Sales + Offline Sales
+ * ✅ OPTIMIZED: Uses Promise.all() to parallelize all queries
  */
 exports.getStats = async (req, res, next) => {
   try {
-    // Calculate online sales (from delivered orders)
-    const onlineSalesResult = await Order.aggregate([
-      { $match: { status: 'delivered' } },
-      { $group: { _id: null, total: { $sum: '$total_amount' } } }
-    ]);
-    const onlineSales = onlineSalesResult[0]?.total || 0;
-
-    // Calculate offline sales
-    const offlineSalesResult = await OfflineSale.aggregate([
-      { $group: { _id: null, total: { $sum: '$totalAmount' } } }
-    ]);
-    const offlineSales = offlineSalesResult[0]?.total || 0;
-
-    // Calculate expenses
-    const expensesResult = await Expense.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const expenses = expensesResult[0]?.total || 0;
-
-    // Calculate total revenue
-    const totalRevenue = onlineSales + offlineSales;
-
-    // Get counts
-    const totalOrders = await Order.countDocuments();
-    const totalCustomers = await User.countDocuments({ role: 'user' });
-    const totalProducts = await Product.countDocuments();
-
-    // Calculate percentage changes (compare with previous month)
     const previousMonth = new Date();
     previousMonth.setMonth(previousMonth.getMonth() - 1);
 
-    const previousOnlineSales = await Order.aggregate([
-      {
-        $match: {
-          status: 'delivered',
-          created_at: { $gte: previousMonth }
-        }
-      },
-      { $group: { _id: null, total: { $sum: '$total_amount' } } }
+    // ✅ Execute all queries in parallel using Promise.all()
+    // This reduces execution time from ~8 sequential queries to parallel execution
+    const [
+      onlineSalesResult,
+      offlineSalesResult,
+      expensesResult,
+      totalOrders,
+      totalCustomers,
+      totalProducts,
+      previousOnlineSales,
+      previousOrders,
+      previousCustomers,
+      previousProducts
+    ] = await Promise.all([
+      // Current period queries
+      Order.aggregate([
+        { $match: { status: 'delivered' } },
+        { $group: { _id: null, total: { $sum: '$total_amount' } } }
+      ]),
+      OfflineSale.aggregate([
+        { $group: { _id: null, total: { $sum: '$totalAmount' } } }
+      ]),
+      Expense.aggregate([
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]),
+      Order.countDocuments(),
+      User.countDocuments({ role: 'user' }),
+      Product.countDocuments(),
+      
+      // Previous month queries for comparison
+      Order.aggregate([
+        {
+          $match: {
+            status: 'delivered',
+            created_at: { $gte: previousMonth }
+          }
+        },
+        { $group: { _id: null, total: { $sum: '$total_amount' } } }
+      ]),
+      Order.countDocuments({ created_at: { $gte: previousMonth } }),
+      User.countDocuments({
+        role: 'user',
+        createdAt: { $gte: previousMonth }
+      }),
+      Product.countDocuments({ createdAt: { $gte: previousMonth } })
     ]);
+
+    // Extract values
+    const onlineSales = onlineSalesResult[0]?.total || 0;
+    const offlineSales = offlineSalesResult[0]?.total || 0;
+    const expenses = expensesResult[0]?.total || 0;
+    const totalRevenue = onlineSales + offlineSales;
+
+    // Calculate percentage changes
     const prevOnline = previousOnlineSales[0]?.total || onlineSales;
     const revenueChange = prevOnline > 0 
       ? ((totalRevenue - prevOnline) / prevOnline) * 100 
       : 0;
 
-    const previousOrders = await Order.countDocuments({
-      created_at: { $gte: previousMonth }
-    });
     const ordersChange = previousOrders > 0 
       ? ((totalOrders - previousOrders) / previousOrders) * 100 
       : 0;
 
-    const previousCustomers = await User.countDocuments({
-      role: 'user',
-      createdAt: { $gte: previousMonth }
-    });
     const customersChange = previousCustomers > 0 
       ? ((totalCustomers - previousCustomers) / previousCustomers) * 100 
       : 0;
 
-    const previousProducts = await Product.countDocuments({
-      createdAt: { $gte: previousMonth }
-    });
     const productsChange = previousProducts > 0 
       ? ((totalProducts - previousProducts) / previousProducts) * 100 
       : 0;
@@ -259,86 +267,132 @@ exports.getExpensesTotal = async (req, res, next) => {
 /**
  * Get revenue overview data (Monthly)
  * Returns revenue and orders data for the last 12 months
+ * ✅ OPTIMIZED: Uses single aggregation with $facet instead of 36 sequential queries
  */
 exports.getRevenueOverview = async (req, res, next) => {
   try {
-    const months = 12;
-    const revenueData = [];
+    // ✅ Calculate date range for last 12 months
+    const endDate = new Date();
+    endDate.setHours(23, 59, 59, 999);
+    
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - 11);
+    startDate.setDate(1);
+    startDate.setHours(0, 0, 0, 0);
 
-    for (let i = months - 1; i >= 0; i--) {
-      const startDate = new Date();
-      startDate.setMonth(startDate.getMonth() - i);
-      startDate.setDate(1);
-      startDate.setHours(0, 0, 0, 0);
-
-      const endDate = new Date(startDate);
-      endDate.setMonth(endDate.getMonth() + 1);
-      endDate.setHours(0, 0, 0, 0);
-
-      // Get online sales for the month
-      const onlineSalesResult = await Order.aggregate([
+    // ✅ Execute all 3 aggregations in parallel instead of 36 sequential queries
+    const [onlineData, offlineData, expenseData] = await Promise.all([
+      // Get online sales grouped by month
+      Order.aggregate([
         {
           $match: {
             status: 'delivered',
-            created_at: { $gte: startDate, $lt: endDate }
+            created_at: { $gte: startDate, $lte: endDate }
           }
         },
         {
           $group: {
-            _id: null,
+            _id: {
+              year: { $year: '$created_at' },
+              month: { $month: '$created_at' }
+            },
             total: { $sum: '$total_amount' },
             count: { $sum: 1 }
           }
-        }
-      ]);
-
-      // Get offline sales for the month
-      const offlineSalesResult = await OfflineSale.aggregate([
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+      ]),
+      
+      // Get offline sales grouped by month
+      OfflineSale.aggregate([
         {
           $match: {
-            date: { $gte: startDate, $lt: endDate }
+            date: { $gte: startDate, $lte: endDate }
           }
         },
         {
           $group: {
-            _id: null,
+            _id: {
+              year: { $year: '$date' },
+              month: { $month: '$date' }
+            },
             total: { $sum: '$totalAmount' }
           }
-        }
-      ]);
-
-      // Get expenses for the month
-      const expensesResult = await Expense.aggregate([
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+      ]),
+      
+      // Get expenses grouped by month
+      Expense.aggregate([
         {
           $match: {
-            date: { $gte: startDate, $lt: endDate }
+            date: { $gte: startDate, $lte: endDate }
           }
         },
         {
           $group: {
-            _id: null,
+            _id: {
+              year: { $year: '$date' },
+              month: { $month: '$date' }
+            },
             total: { $sum: '$amount' }
           }
-        }
-      ]);
+        },
+        { $sort: { '_id.year': 1, '_id.month': 1 } }
+      ])
+    ]);
 
-      const onlineSales = onlineSalesResult[0]?.total || 0;
-      const offlineSales = offlineSalesResult[0]?.total || 0;
-      const expenses = expensesResult[0]?.total || 0;
-      const revenue = onlineSales + offlineSales - expenses;
-      const orders = onlineSalesResult[0]?.count || 0;
-
-      const monthName = startDate.toLocaleString('default', { month: 'short' });
-
-      revenueData.push({
-        month: monthName,
-        revenue: Math.round(revenue),
-        orders,
-        online: Math.round(onlineSales),
-        offline: Math.round(offlineSales),
-        expenses: Math.round(expenses)
+    // ✅ Merge data by month
+    const monthMap = new Map();
+    
+    // Initialize all months in range
+    for (let i = 0; i < 12; i++) {
+      const date = new Date(startDate);
+      date.setMonth(date.getMonth() + i);
+      const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+      monthMap.set(key, {
+        month: date.toLocaleString('default', { month: 'short' }),
+        revenue: 0,
+        orders: 0,
+        online: 0,
+        offline: 0,
+        expenses: 0
       });
     }
+
+    // Add online sales data
+    onlineData.forEach(item => {
+      const key = `${item._id.year}-${item._id.month}`;
+      if (monthMap.has(key)) {
+        const data = monthMap.get(key);
+        data.online = Math.round(item.total);
+        data.orders = item.count;
+      }
+    });
+
+    // Add offline sales data
+    offlineData.forEach(item => {
+      const key = `${item._id.year}-${item._id.month}`;
+      if (monthMap.has(key)) {
+        const data = monthMap.get(key);
+        data.offline = Math.round(item.total);
+      }
+    });
+
+    // Add expenses data
+    expenseData.forEach(item => {
+      const key = `${item._id.year}-${item._id.month}`;
+      if (monthMap.has(key)) {
+        const data = monthMap.get(key);
+        data.expenses = Math.round(item.total);
+      }
+    });
+
+    // Calculate revenue for each month
+    const revenueData = Array.from(monthMap.values()).map(data => ({
+      ...data,
+      revenue: Math.round(data.online + data.offline - data.expenses)
+    }));
 
     return res.json({
       success: true,

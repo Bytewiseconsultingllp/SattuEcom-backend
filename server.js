@@ -68,6 +68,13 @@ app.options("*", cors());
 // Razorpay webhooks need raw body for signature verification
 app.use('/api/webhooks', webhookRoutes);
 
+// ✅ Request timeout middleware (45 seconds for all requests)
+app.use((req, res, next) => {
+  req.setTimeout(45000); // 45 seconds
+  res.setTimeout(45000); // 45 seconds
+  next();
+});
+
 // Body parser middleware
 app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
