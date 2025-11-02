@@ -447,52 +447,114 @@ exports.updateOrderStatus = async (req, res, next) => {
 
 /**
  * Get all orders (Admin only)
- * Matches Supabase getAllOrders function
+ * ✅ OPTIMIZED: Uses aggregation to fetch all data in 1-2 queries instead of N+1
  */
 exports.getAllOrders = async (req, res, next) => {
   try {
-    // This should be protected by admin middleware
-    const orders = await Order.find()
-      .populate("user_id", "name email")
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Get order items for each order
-    for (let order of orders) {
-      const orderItems = await OrderItem.find({ order_id: order._id })
-        .populate({ path: "product_id", select: "name" })
-        .lean();
-
-      order.order_items = orderItems
-        .filter((item) => !!item.product_id)
-        .map((item) => ({
-          id: item._id.toString(),
-          order_id: item.order_id.toString(),
-          product_id: item.product_id._id.toString(),
-          quantity: item.quantity,
-          price: item.price,
-          created_at: item.created_at,
-          product: { name: item.product_id.name },
-        }));
-      // Format user info
-      if (order.user_id) {
-        order.user = {
-          full_name: order.user_id.name,
-          email: order.user_id.email,
-        };
-        order.user_id = order.user_id._id.toString();
+    // ✅ Use aggregation to fetch orders with order items in a single query
+    const orders = await Order.aggregate([
+      // Step 1: Sort orders by creation date
+      { $sort: { createdAt: -1 } },
+      
+      // Step 2: Lookup order items for each order
+      {
+        $lookup: {
+          from: 'orderitems',
+          localField: '_id',
+          foreignField: 'order_id',
+          as: 'order_items'
+        }
+      },
+      
+      // Step 3: Lookup product details for each order item
+      {
+        $lookup: {
+          from: 'products',
+          localField: 'order_items.product_id',
+          foreignField: '_id',
+          as: 'products'
+        }
+      },
+      
+      // Step 4: Lookup user details
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'user_id',
+          foreignField: '_id',
+          as: 'user_details'
+        }
+      },
+      
+      // Step 5: Unwind and restructure order items with product info
+      {
+        $addFields: {
+          order_items: {
+            $map: {
+              input: '$order_items',
+              as: 'item',
+              in: {
+                id: { $toString: '$$item._id' },
+                order_id: { $toString: '$$item.order_id' },
+                product_id: { $toString: '$$item.product_id' },
+                quantity: '$$item.quantity',
+                price: '$$item.price',
+                created_at: '$$item.created_at',
+                product: {
+                  $arrayElemAt: [
+                    {
+                      $filter: {
+                        input: '$products',
+                        as: 'prod',
+                        cond: { $eq: ['$$prod._id', '$$item.product_id'] }
+                      }
+                    },
+                    0
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      
+      // Step 6: Format response
+      {
+        $project: {
+          id: { $toString: '$_id' },
+          user_id: { $toString: '$user_id' },
+          total_amount: 1,
+          status: 1,
+          shipping_address_id: { $toString: '$shipping_address_id' },
+          created_at: '$createdAt',
+          updated_at: '$updatedAt',
+          order_items: {
+            $map: {
+              input: '$order_items',
+              as: 'item',
+              in: {
+                id: '$$item.id',
+                order_id: '$$item.order_id',
+                product_id: '$$item.product_id',
+                quantity: '$$item.quantity',
+                price: '$$item.price',
+                created_at: '$$item.created_at',
+                product: {
+                  name: { $ifNull: ['$$item.product.name', 'Unknown'] }
+                }
+              }
+            }
+          },
+          user: {
+            full_name: { $arrayElemAt: ['$user_details.name', 0] },
+            email: { $arrayElemAt: ['$user_details.email', 0] }
+          },
+          _id: 0,
+          products: 0,
+          user_details: 0
+        }
       }
-
-      // Format order
-      order.id = order._id.toString();
-      order.shipping_address_id = order.shipping_address_id.toString();
-      order.created_at = order.createdAt;
-      order.updated_at = order.updatedAt;
-      delete order._id;
-      delete order.createdAt;
-      delete order.updatedAt;
-      delete order.__v;
-    }
+    ]);
 
     res.status(200).json({
       success: true,
