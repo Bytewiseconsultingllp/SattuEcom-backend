@@ -111,6 +111,7 @@ exports.createProduct = async (req, res, next) => {
       category: body.category,
       description: body.description,
       images: body.images, // Array of base64 strings
+      stock: body.stock !== undefined ? body.stock : 0,
       in_stock: body.in_stock,
       ingredients: body.ingredients,
       usage: body.usage,

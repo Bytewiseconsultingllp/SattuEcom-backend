@@ -21,6 +21,15 @@ const usersRouter = require("./routes/userRoutes");
 const adminReviewRoutes = require("./routes/adminReviewsRoutes");
 const couponRoutes = require("./routes/couponRoutes");
 const adminCouponRoutes = require("./routes/adminCouponRoutes");
+const paymentRoutes = require('./routes/payments');
+const adminPaymentRoutes = require('./routes/adminPayments');
+const webhookRoutes = require('./routes/webhooks');
+const bannerRoutes = require('./routes/bannerRoutes');
+const offlineSaleRoutes = require('./routes/offlineSaleRoutes');
+const expenseRoutes = require('./routes/expenseRoutes');
+const companySettingsRoutes = require('./routes/companySettingsRoutes');
+const contactQueryRoutes = require('./routes/contactQueryRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
 
 // Initialize express app
 const app = express();
@@ -54,8 +63,14 @@ app.use(
 
 // ✅ Handle preflight requests
 app.options("*", cors());
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+// ⚠️ IMPORTANT: Webhook route MUST come BEFORE express.json() middleware
+// Razorpay webhooks need raw body for signature verification
+app.use('/api/webhooks', webhookRoutes);
+
+// Body parser middleware
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
 // Session middleware (required for OAuth)
 app.use(
@@ -70,8 +85,6 @@ app.use(
     },
   })
 );
-
-app.use(express.json({ limit: "20mb" }));
 
 // Initialize Passport
 app.use(passport.initialize());
@@ -97,20 +110,55 @@ app.get("/", (req, res) => {
   });
 });
 
+// Auth routes
 app.use("/api/auth", authRoutes);
 app.use("/api/auth", oauthRoutes);
+
+// Product & Category routes
 app.use("/api/products", productRoutes);
+app.use("/api", categoryRoutes);
+
+// User routes
+app.use("/api", usersRouter);
 app.use("/api/addresses", addressRoutes);
+app.use("/api/wishlist", wishlistRoutes);
+
+// Cart & Order routes
 app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
-app.use("/api/wishlist", wishlistRoutes);
+
+// Payment routes (NEW)
+app.use('/api/payments', paymentRoutes);
+app.use('/api/admin/payments', adminPaymentRoutes);
+
+// Review routes
 app.use("/api/reviews", reviewRoutes);
-app.use("/health", healthRoutes);
+app.use("/api/admin/reviews", adminReviewRoutes);
+
+// Coupon routes
 app.use("/api/coupons", couponRoutes);
 app.use("/api/admin/coupons", adminCouponRoutes);
-app.use("/api", categoryRoutes);
-app.use("/api", usersRouter);
-app.use("/api/admin/reviews", adminReviewRoutes);
+
+// Banner routes
+app.use("/api/banners", bannerRoutes);
+
+// Offline Sales routes
+app.use("/api/admin/offline-sales", offlineSaleRoutes);
+
+// Expense routes
+app.use("/api/admin/expenses", expenseRoutes);
+
+// Company Settings routes
+app.use("/api/company-settings", companySettingsRoutes);
+
+// Contact Query routes
+app.use("/api/contact-queries", contactQueryRoutes);
+
+// Dashboard routes (NEW)
+app.use("/api/admin/dashboard", dashboardRoutes);
+
+// Health check
+app.use("/health", healthRoutes);
 
 // Error handler middleware (must be last)
 app.use(errorHandler);
@@ -125,6 +173,7 @@ app.listen(PORT, () => {
   ║   Port: ${PORT.toString().padEnd(31)}║
   ║   Environment: ${(process.env.NODE_ENV || "development").padEnd(22)}║
   ║   Swagger Docs: http://localhost:${PORT}/api-docs
+  ║   Payment: Razorpay Integrated ✓       ║
   ╚════════════════════════════════════════╝
   `);
 });

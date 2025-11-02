@@ -5,7 +5,7 @@ const User = require('../models/User');
 exports.getAllUsers = async (req, res, next) => {
   try {
     // Basic projection: only safe, needed fields
-    const users = await User.find({}, 'name email role isVerified createdAt')
+    const users = await User.find({}, 'name email role phone isVerified status createdAt')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -14,7 +14,10 @@ exports.getAllUsers = async (req, res, next) => {
       name: u.name,
       email: u.email,
       role: u.role,
+      phone: u.phone,
+      status: u.status,
       isVerified: u.isVerified,
+      created_at: u.createdAt,
       createdAt: u.createdAt,
     }));
 

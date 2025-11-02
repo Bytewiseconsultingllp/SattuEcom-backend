@@ -32,6 +32,26 @@ const orderSchema = new mongoose.Schema(
     cancellation_reason: { type: String, default: '' },
     cancelled_at: { type: Date },
     cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+
+    // Shipment details (for shipped orders)
+    shipment: {
+      deliveryPartner: {
+        type: String,
+        default: null,
+      },
+      trackingNumber: {
+        type: String,
+        default: null,
+      },
+      estimatedDelivery: {
+        type: String,
+        default: null,
+      },
+      shippedAt: {
+        type: Date,
+        default: null,
+      },
+    },
   },
   {
     timestamps: true,

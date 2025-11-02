@@ -359,7 +359,7 @@ exports.createOrder = async (req, res, next) => {
  */
 exports.updateOrderStatus = async (req, res, next) => {
   try {
-    const { status } = req.body;
+    const { status, shipmentDetails } = req.body;
     const orderId = req.params.id;
 
     // Validate status
@@ -377,6 +377,26 @@ exports.updateOrderStatus = async (req, res, next) => {
       });
     }
 
+    // Build update object
+    const updateData = { status };
+
+    // If status is shipped, handle shipment details
+    if (status === "shipped" && shipmentDetails) {
+      if (!shipmentDetails.deliveryPartner || !shipmentDetails.trackingNumber) {
+        return res.status(400).json({
+          success: false,
+          message: 'Delivery partner and tracking number are required for shipped status',
+        });
+      }
+
+      updateData.shipment = {
+        deliveryPartner: shipmentDetails.deliveryPartner,
+        trackingNumber: shipmentDetails.trackingNumber,
+        estimatedDelivery: shipmentDetails.estimatedDelivery || null,
+        shippedAt: new Date(),
+      };
+    }
+
     // For regular users, they can only access their own orders
     // For admin route, we'll check if user is admin (implement role-based access)
     let query = { _id: orderId };
@@ -388,7 +408,7 @@ exports.updateOrderStatus = async (req, res, next) => {
 
     const order = await Order.findOneAndUpdate(
       query,
-      { status },
+      updateData,
       { new: true, runValidators: true }
     ).lean();
 
