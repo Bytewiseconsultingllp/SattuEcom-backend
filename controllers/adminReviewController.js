@@ -78,8 +78,10 @@ exports.getAllReviews = async (req, res, next) => {
     res.status(200).json({
       success: true,
       count: formattedReviews.length,
+      total,
       page,
       limit,
+      totalPages: Math.ceil(total / limit),
       data: formattedReviews,
     });
   } catch (error) {

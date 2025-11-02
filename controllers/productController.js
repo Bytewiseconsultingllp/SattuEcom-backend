@@ -2,12 +2,12 @@ const Product = require('../models/Product');
 const Category = require('../models/Category');
  
 /**
-* Get all products with optional filters
+* Get all products with optional filters and pagination
 * Matches Supabase getProducts function
 */
 exports.getProducts = async (req, res, next) => {
   try {
-    const { category, minPrice, maxPrice, inStockOnly } = req.query;
+    const { category, minPrice, maxPrice, inStockOnly, page = 1, limit = 10 } = req.query;
  
     // Build query object
     let query = {};
@@ -33,12 +33,28 @@ exports.getProducts = async (req, res, next) => {
       query.in_stock = true;
     }
  
-    // Execute query with sorting (newest first, matching Supabase)
-    const products = await Product.find(query).sort({ createdAt: -1 });
+    // ✅ Pagination
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 10)); // Max 100 per page
+    const skip = (pageNum - 1) * limitNum;
+ 
+    // Get total count for pagination
+    const total = await Product.countDocuments(query);
+    
+    // Execute query with sorting, pagination
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
  
     res.status(200).json({
       success: true,
       count: products.length,
+      total,
+      page: pageNum,
+      limit: limitNum,
+      totalPages: Math.ceil(total / limitNum),
       data: products,
     });
   } catch (error) {

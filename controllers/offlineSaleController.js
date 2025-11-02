@@ -1,10 +1,12 @@
 const OfflineSale = require('../models/OfflineSale');
 
 /**
- * Get all offline sales
+ * Get all offline sales with pagination
  */
 exports.getOfflineSales = async (req, res, next) => {
   try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
     const { startDate, endDate, paymentMethod } = req.query;
 
     let query = {};
@@ -23,11 +25,22 @@ exports.getOfflineSales = async (req, res, next) => {
       query.paymentMethod = paymentMethod;
     }
 
-    const sales = await OfflineSale.find(query).sort({ date: -1 });
+    const [sales, total] = await Promise.all([
+      OfflineSale.find(query)
+        .sort({ date: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      OfflineSale.countDocuments(query),
+    ]);
 
     res.status(200).json({
       success: true,
       count: sales.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: sales,
     });
   } catch (error) {

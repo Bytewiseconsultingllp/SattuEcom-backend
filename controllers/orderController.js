@@ -447,20 +447,10 @@ exports.updateOrderStatus = async (req, res, next) => {
 
 /**
  * Get all orders (Admin only)
- * ✅ OPTIMIZED: Uses aggregation with pagination
- * Query params: page (default: 1), limit (default: 10)
+ * ✅ OPTIMIZED: Uses aggregation to fetch all data in 1-2 queries instead of N+1
  */
 exports.getAllOrders = async (req, res, next) => {
   try {
-    // ✅ Get pagination parameters from query
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
-
-    // ✅ Get total count of orders
-    const totalOrders = await Order.countDocuments();
-    const totalPages = Math.ceil(totalOrders / limit);
-
     // ✅ Use aggregation to fetch orders with order items in a single query
     const orders = await Order.aggregate([
       // Step 1: Sort orders by creation date
@@ -561,24 +551,12 @@ exports.getAllOrders = async (req, res, next) => {
             email: { $arrayElemAt: ['$user_details.email', 0] }
           }
         }
-      },
-      
-      // Step 7: Apply pagination
-      { $skip: skip },
-      { $limit: limit }
+      }
     ]);
 
     res.status(200).json({
       success: true,
       count: orders.length,
-      pagination: {
-        page,
-        limit,
-        total: totalOrders,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPrevPage: page > 1
-      },
       data: orders,
     });
   } catch (error) {

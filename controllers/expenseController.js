@@ -1,10 +1,12 @@
 const Expense = require('../models/Expense');
 
 /**
- * Get all expenses
+ * Get all expenses with pagination
  */
 exports.getExpenses = async (req, res, next) => {
   try {
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
     const { category, startDate, endDate, vendor } = req.query;
 
     let query = {};
@@ -27,11 +29,22 @@ exports.getExpenses = async (req, res, next) => {
       query.vendor = new RegExp(vendor, 'i');
     }
 
-    const expenses = await Expense.find(query).sort({ date: -1 });
+    const [expenses, total] = await Promise.all([
+      Expense.find(query)
+        .sort({ date: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Expense.countDocuments(query),
+    ]);
 
     res.status(200).json({
       success: true,
       count: expenses.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: expenses,
     });
   } catch (error) {
