@@ -13,7 +13,7 @@ exports.getCartItems = async (req, res, next) => {
     const items = await CartItem.find({ user_id: userId })
       .populate({
         path: 'product_id',
-        select: 'name price image_url in_stock createdAt updatedAt',
+        select: 'name price images in_stock createdAt updatedAt',
       })
       .sort({ created_at: -1 })
       .lean();
@@ -36,7 +36,7 @@ exports.getCartItems = async (req, res, next) => {
         id: it.product_id._id.toString(),
         name: it.product_id.name,
         price: it.product_id.price,
-        image_url: it.product_id.image_url,
+        images: it.product_id.images,
         in_stock: it.product_id.in_stock,
         created_at: it.product_id.createdAt,
         updated_at: it.product_id.updatedAt,

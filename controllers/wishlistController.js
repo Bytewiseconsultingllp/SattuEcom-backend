@@ -13,7 +13,7 @@ exports.getWishlistItems = async (req, res, next) => {
     const wishlistItems = await WishlistItem.find({ user_id: userId })
       .populate({
         path: 'product_id',
-        select: 'name description price original_price category image_url in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
+        select: 'name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
       })
       .sort({ created_at: -1 })
       .lean();
@@ -43,7 +43,7 @@ exports.getWishlistItems = async (req, res, next) => {
         price: item.product_id.price,
         original_price: item.product_id.original_price,
         category: item.product_id.category,
-        image_url: item.product_id.image_url,
+        images: item.product_id.images,
         in_stock: item.product_id.in_stock,
         rating: item.product_id.rating,
         reviews_count: item.product_id.reviews_count,
@@ -125,7 +125,7 @@ exports.addToWishlist = async (req, res, next) => {
         price: wishlistItem.product_id.price,
         original_price: wishlistItem.product_id.original_price,
         category: wishlistItem.product_id.category,
-        image_url: wishlistItem.product_id.image_url,
+        images: wishlistItem.product_id.images,
         in_stock: wishlistItem.product_id.in_stock,
         rating: wishlistItem.product_id.rating,
         reviews_count: wishlistItem.product_id.reviews_count,

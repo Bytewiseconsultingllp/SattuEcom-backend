@@ -1,4 +1,5 @@
 const Product = require('../models/Product');
+const Category = require('../models/Category');
  
 /**
 * Get all products with optional filters
@@ -85,14 +86,12 @@ exports.createProduct = async (req, res, next) => {
   try {
     const body = { ...req.body };
 
-    // Normalize images array and primary image
-    const images = Array.isArray(body.images)
-      ? body.images.filter(Boolean)
-      : (body.image_url ? [body.image_url] : []);
-    if (!body.image_url && images.length > 0) {
-      body.image_url = images[0];
+    if (!body.images || !Array.isArray(body.images) || body.images.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'At least one image is required' 
+      });
     }
-    body.images = images;
 
     // Ensure category exists (create if missing)
     const catName = (body.category || '').trim();
@@ -105,7 +104,18 @@ exports.createProduct = async (req, res, next) => {
       cat = created.toObject();
     }
 
-    const product = await Product.create(body);
+    const product = await Product.create({
+      name: body.name,
+      price: body.price,
+      original_price: body.original_price,
+      category: body.category,
+      description: body.description,
+      images: body.images, // Array of base64 strings
+      in_stock: body.in_stock,
+      ingredients: body.ingredients,
+      usage: body.usage,
+      benefits: body.benefits || [],
+    });
 
     res.status(201).json({ success: true, data: product });
   } catch (error) {
@@ -125,27 +135,24 @@ exports.updateProduct = async (req, res, next) => {
   try {
     const body = { ...req.body };
 
-    // If images provided, normalize and set primary image_url
+    // If images provided, validate
     if (body.images !== undefined) {
-      const images = Array.isArray(body.images) ? body.images.filter(Boolean) : [];
-      body.images = images;
-      if ((!body.image_url || body.image_url === '') && images.length > 0) {
-        body.image_url = images[0];
+      if (!Array.isArray(body.images) || body.images.length === 0) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'At least one image is required' 
+        });
       }
-      // If images cleared and image_url empty, keep existing primary (handled by DB if not provided)
-      if (images.length === 0 && body.image_url === '') {
-        delete body.image_url;
-      }
-    } else if (body.image_url && typeof body.image_url === 'string') {
-      // If only image_url provided (no images array), keep it as primary
-      // optional: ensure images includes it
     }
 
-    // If category changed, ensure it exists (create if missing)
+    // If category changed, ensure it exists
     if (typeof body.category === 'string') {
       const catName = body.category.trim();
       if (!catName) {
-        return res.status(400).json({ success: false, message: 'Category is required' });
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Category is required' 
+        });
       }
       let cat = await Category.findOne({ name: catName }).lean();
       if (!cat) {
@@ -175,6 +182,8 @@ exports.updateProduct = async (req, res, next) => {
       data: product,
     });
   } catch (error) {
+    console.error('Update Product Error:', error);
+    
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({

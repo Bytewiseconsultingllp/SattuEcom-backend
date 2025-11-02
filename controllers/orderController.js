@@ -17,12 +17,13 @@ exports.getOrders = async (req, res, next) => {
     const userId = req.user._id;
 
     const orders = await Order.find({ user_id: userId })
-      .populate({ path: 'shipping_address_id', model: 'Address' })
+      .populate({ path: "shipping_address_id", model: "Address" })
       .populate({
-        path: 'order_items',
+        path: "order_items",
         populate: {
-          path: 'product_id',
-          select: 'name description price original_price category image_url in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
+          path: "product_id",
+          select:
+            "name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt",
         },
       })
       .sort({ createdAt: -1 })
@@ -45,7 +46,7 @@ exports.getOrders = async (req, res, next) => {
               price: item.product_id.price,
               original_price: item.product_id.original_price,
               category: item.product_id.category,
-              image_url: item.product_id.image_url,
+              images: item.product_id.images,
               in_stock: item.product_id.in_stock,
               rating: item.product_id.rating,
               reviews_count: item.product_id.reviews_count,
@@ -121,15 +122,17 @@ exports.getOrderById = async (req, res, next) => {
     const orderId = req.params.id;
 
     const order = await Order.findOne({ _id: orderId, user_id: userId })
-      .populate('shipping_address_id')
+      .populate("shipping_address_id")
       .lean();
 
     if (!order) {
-      return res.status(404).json({ success: false, message: 'Order not found' });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     const orderItems = await OrderItem.find({ order_id: order._id })
-      .populate('product_id')
+      .populate("product_id")
       .lean();
 
     order.order_items = orderItems.map((item) => ({
@@ -146,7 +149,7 @@ exports.getOrderById = async (req, res, next) => {
         price: item.product_id.price,
         original_price: item.product_id.original_price,
         category: item.product_id.category,
-        image_url: item.product_id.image_url,
+        images: item.product_id.images,
         in_stock: item.product_id.in_stock,
         rating: item.product_id.rating,
         reviews_count: item.product_id.reviews_count,
@@ -189,8 +192,10 @@ exports.getOrderById = async (req, res, next) => {
 
     return res.status(200).json({ success: true, data: order });
   } catch (error) {
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({ success: false, message: 'Order not found' });
+    if (error.kind === "ObjectId") {
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     next(error);
   }
@@ -277,7 +282,7 @@ exports.createOrder = async (req, res, next) => {
       product: {
         id: item.product_id._id.toString(),
         name: item.product_id.name,
-        image_url: item.product_id.image_url, // ensure this exists in your model
+        images: item.product_id.images, // ensure this exists in your model
         price: item.product_id.price,
       },
     }));
@@ -435,21 +440,20 @@ exports.getAllOrders = async (req, res, next) => {
     // Get order items for each order
     for (let order of orders) {
       const orderItems = await OrderItem.find({ order_id: order._id })
-        .populate("product_id", "name")
+        .populate({ path: "product_id", select: "name" })
         .lean();
 
-      order.order_items = orderItems.map((item) => ({
-        id: item._id.toString(),
-        order_id: item.order_id.toString(),
-        product_id: item.product_id._id.toString(),
-        quantity: item.quantity,
-        price: item.price,
-        created_at: item.created_at,
-        product: {
-          name: item.product_id.name,
-        },
-      }));
-
+      order.order_items = orderItems
+        .filter((item) => !!item.product_id)
+        .map((item) => ({
+          id: item._id.toString(),
+          order_id: item.order_id.toString(),
+          product_id: item.product_id._id.toString(),
+          quantity: item.quantity,
+          price: item.price,
+          created_at: item.created_at,
+          product: { name: item.product_id.name },
+        }));
       // Format user info
       if (order.user_id) {
         order.user = {
@@ -488,11 +492,13 @@ exports.cancelOrder = async (req, res, next) => {
     const userId = req.user._id;
     const orderId = req.params.id;
     const reasonRaw = req.body?.reason;
-    const reason = typeof reasonRaw === 'string' ? reasonRaw.trim() : '';
+    const reason = typeof reasonRaw === "string" ? reasonRaw.trim() : "";
 
     const order = await Order.findOne({ _id: orderId, user_id: userId });
     if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
 
     if (!["pending", "processing"].includes(order.status)) {
@@ -503,7 +509,8 @@ exports.cancelOrder = async (req, res, next) => {
     }
 
     order.status = "cancelled";
-    if ("cancellation_reason" in order) order.cancellation_reason = reason || "";
+    if ("cancellation_reason" in order)
+      order.cancellation_reason = reason || "";
     if ("cancelled_at" in order) order.cancelled_at = new Date();
     if ("cancelled_by" in order) order.cancelled_by = userId;
     await order.save();
@@ -527,7 +534,7 @@ exports.cancelOrder = async (req, res, next) => {
       product: {
         id: item.product_id._id.toString(),
         name: item.product_id.name,
-        image_url: item.product_id.image_url,
+        images: item.product_id.images,
         price: item.product_id.price,
       },
     }));
@@ -589,7 +596,9 @@ exports.cancelOrder = async (req, res, next) => {
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
-      return res.status(404).json({ success: false, message: "Order not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Order not found" });
     }
     next(error);
   }

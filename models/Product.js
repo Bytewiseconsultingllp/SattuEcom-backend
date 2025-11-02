@@ -25,11 +25,11 @@ const productSchema = new mongoose.Schema(
       required: [true, 'Product category is required'],
       trim: true,
     },
-    image_url: {
-      type: String,
-      required: [true, 'Product image URL is required'],
-    },
-    images: { type: [String], default: [] }, // NEW
+    images: {
+  type: [String],
+  required: true,
+  validate: { validator: v => v && v.length > 0 }
+},
     in_stock: {
       type: Boolean,
       default: true,

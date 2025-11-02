@@ -1,5 +1,6 @@
 const Category = require('../models/Category');
 
+
 // GET /categories
 exports.getCategories = async (_req, res, next) => {
   try {
