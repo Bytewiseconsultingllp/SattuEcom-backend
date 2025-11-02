@@ -18,6 +18,7 @@ const healthRoutes = require('./routes/healthRoutes');
 const passport = require('./config/passport');
 const categoryRoutes = require('./routes/categories');
 const usersRouter = require('./routes/userRoutes');
+const adminReviewRoutes = require('./routes/adminReviewsRoutes');
  
 // Initialize express app
 const app = express();
@@ -70,6 +71,7 @@ app.use(
 app.use(express.json({ limit: '20mb' }));
 app.use('/api', categoryRoutes);
 app.use('/api', usersRouter);
+app.use('/api/admin/reviews', adminReviewRoutes);
  
 // Initialize Passport
 app.use(passport.initialize());

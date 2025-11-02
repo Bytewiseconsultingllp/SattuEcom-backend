@@ -20,6 +20,10 @@ const reviewSchema = new mongoose.Schema(
       min: [1, 'Rating must be at least 1'],
       max: [5, 'Rating cannot be more than 5'],
     },
+    is_hidden: {
+      type: Boolean,
+      default: false,
+    },
     comment: {
       type: String,
       trim: true,
