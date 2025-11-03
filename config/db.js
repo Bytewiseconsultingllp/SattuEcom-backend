@@ -14,7 +14,7 @@ const connectDB = async () => {
       // Timeouts
       serverSelectionTimeoutMS: 5000,  // Timeout for selecting a server (5 seconds)
       socketTimeoutMS: 45000,          // Timeout for socket operations (45 seconds)
-      connectTimeoutMS: 10000,         // Timeout for initial connection (10 seconds)
+      connectTimeoutMS: 45000,         // Timeout for initial connection (10 seconds)
       
       // Retry logic
       retryWrites: true,               // Enable automatic retry for write operations
