@@ -12,7 +12,7 @@ const connectDB = async () => {
       minPoolSize: 5,               // Minimum number of connections to maintain
       
       // Timeouts
-      serverSelectionTimeoutMS: 5000,  // Timeout for selecting a server (5 seconds)
+      serverSelectionTimeoutMS: 45000,  // Timeout for selecting a server (5 seconds)
       socketTimeoutMS: 45000,          // Timeout for socket operations (45 seconds)
       connectTimeoutMS: 45000,         // Timeout for initial connection (10 seconds)
       
@@ -21,7 +21,7 @@ const connectDB = async () => {
       retryReads: true,                // Enable automatic retry for read operations
       
       // Connection monitoring
-      heartbeatFrequencyMS: 10000,     // Heartbeat frequency (10 seconds)
+      heartbeatFrequencyMS: 45000,     // Heartbeat frequency (10 seconds)
       
       // Performance
       useNewUrlParser: true,
@@ -30,7 +30,7 @@ const connectDB = async () => {
  
     console.log(`MongoDB Connected: ${conn.connection.host}`);
     console.log(`Connection Pool: min=${5}, max=${10}`);
-    console.log(`Timeouts: server=${5}s, socket=${45}s, connect=${10}s`);
+    console.log(`Timeouts: server=${45}s, socket=${45}s, connect=${45}s`);
   } catch (error) {
     console.error(`Error connecting to MongoDB: ${error.message}`);
     console.error('\nPlease check your MongoDB connection string in the .env file');
