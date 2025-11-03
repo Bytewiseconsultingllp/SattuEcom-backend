@@ -15,19 +15,26 @@ const {
 exports.getOrders = async (req, res, next) => {
   try {
     const userId = req.user._id;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
 
-    const orders = await Order.find({ user_id: userId })
-      .populate({ path: "shipping_address_id", model: "Address" })
-      .populate({
-        path: "order_items",
-        populate: {
-          path: "product_id",
-          select:
-            "name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt",
-        },
-      })
-      .sort({ createdAt: -1 })
-      .lean();
+    const [orders, total] = await Promise.all([
+      Order.find({ user_id: userId })
+        .populate({ path: "shipping_address_id", model: "Address" })
+        .populate({
+          path: "order_items",
+          populate: {
+            path: "product_id",
+            select:
+              "name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt",
+          },
+        })
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      Order.countDocuments({ user_id: userId }),
+    ]);
 
     const formatted = orders.map((order) => {
       // map items to your shape
@@ -105,6 +112,10 @@ exports.getOrders = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       count: formatted.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: formatted,
     });
   } catch (error) {

@@ -68,8 +68,10 @@ exports.getProductReviews = async (req, res, next) => {
     res.status(200).json({ 
       success: true, 
       count: formattedReviews.length, 
+      total,
       page, 
-      limit, 
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: formattedReviews 
     });
   } catch (error) {
@@ -119,8 +121,10 @@ exports.getUserReviews = async (req, res, next) => {
     res.status(200).json({
       success: true,
       count: formattedReviews.length,
+      total,
       page,
       limit,
+      totalPages: Math.ceil(total / limit),
       data: formattedReviews,
     });
   } catch (error) {

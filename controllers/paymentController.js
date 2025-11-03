@@ -369,6 +369,7 @@ exports.getMyPayments = async (req, res, next) => {
       total,
       page,
       limit,
+      totalPages: Math.ceil(total / limit),
       data: formattedPayments,
     });
   } catch (error) {

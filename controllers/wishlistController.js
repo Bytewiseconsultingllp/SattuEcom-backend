@@ -9,14 +9,21 @@ const Product = require('../models/Product');
 exports.getWishlistItems = async (req, res, next) => {
   try {
     const userId = req.user._id;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
 
-    const wishlistItems = await WishlistItem.find({ user_id: userId })
-      .populate({
-        path: 'product_id',
-        select: 'name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
-      })
-      .sort({ created_at: -1 })
-      .lean();
+    const [wishlistItems, total] = await Promise.all([
+      WishlistItem.find({ user_id: userId })
+        .populate({
+          path: 'product_id',
+          select: 'name description price original_price category images in_stock rating reviews_count benefits ingredients usage createdAt updatedAt',
+        })
+        .sort({ created_at: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      WishlistItem.countDocuments({ user_id: userId }),
+    ]);
 
     // Filter out entries where product is missing (dangling references)
     const valid = wishlistItems.filter(item => item.product_id);
@@ -58,13 +65,17 @@ exports.getWishlistItems = async (req, res, next) => {
     return res.status(200).json({
       success: true,
       count: formattedItems.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
       data: formattedItems,
     });
   } catch (error) {
     next(error);
   }
 };
- 
+
 /**
 * Add product to wishlist
 * Matches Supabase addToWishlist function
