@@ -34,9 +34,6 @@ const dashboardRoutes = require('./routes/dashboardRoutes');
 // Initialize express app
 const app = express();
 
-// Connect to MongoDB
-connectDB();
-
 // ✅ Load allowed origins from .env and split into an array
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
@@ -170,10 +167,16 @@ app.use("/health", healthRoutes);
 // Error handler middleware (must be last)
 app.use(errorHandler);
 
-// Start server
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`
+// ✅ CRITICAL FIX: Start server with proper async/await for MongoDB connection
+const startServer = async () => {
+  try {
+    // Connect to MongoDB FIRST and WAIT for connection
+    await connectDB();
+    
+    // Only start server after MongoDB is connected
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`
   ╔════════════════════════════════════════╗
   ║   E-commerce Backend Server Started    ║
   ╠════════════════════════════════════════╣
@@ -182,12 +185,20 @@ app.listen(PORT, () => {
   ║   Swagger Docs: http://localhost:${PORT}/api-docs
   ║   Payment: Razorpay Integrated ✓       ║
   ╚════════════════════════════════════════╝
-  `);
-});
+      `);
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
 
 // Handle unhandled promise rejections
 process.on("unhandledRejection", (err) => {
-  console.log("UNHANDLED REJECTION! Shutting down...");
+  console.log("❌ UNHANDLED REJECTION! Shutting down...");
   console.log(err.name, err.message);
   process.exit(1);
 });
