@@ -5,16 +5,19 @@ mongoose.set('strictQuery', false);
  
 const connectDB = async () => {
   try {
+    // Detect serverless environment
+    const isServerless = process.env.LAMBDA_TASK_ROOT || process.env.VERCEL || process.env.NETLIFY;
+    
     // Connection pooling and timeout configuration
-    const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      // Connection pooling - PRODUCTION OPTIMIZED
-      maxPoolSize: 50,              // Increased for production load
-      minPoolSize: 10,              // Maintain minimum connections
+    const connectionOptions = {
+      // Connection pooling - Optimized for environment
+      maxPoolSize: isServerless ? 10 : 50,    // Smaller pool for serverless
+      minPoolSize: isServerless ? 1 : 10,     // Minimal for serverless
       
       // Timeouts - PRODUCTION OPTIMIZED
-      serverSelectionTimeoutMS: 60000,  // 60 seconds to select server
-      socketTimeoutMS: 60000,           // 60 seconds for socket operations
-      connectTimeoutMS: 60000,          // 60 seconds for initial connection
+      serverSelectionTimeoutMS: 30000,  // 30 seconds to select server
+      socketTimeoutMS: 45000,           // 45 seconds for socket operations
+      connectTimeoutMS: 30000,          // 30 seconds for initial connection
       
       // Retry logic
       retryWrites: true,               // Enable automatic retry for write operations
@@ -23,8 +26,9 @@ const connectDB = async () => {
       // Connection monitoring
       heartbeatFrequencyMS: 30000,     // Heartbeat every 30 seconds
       
-      // Buffering - CRITICAL FIX
-      bufferCommands: false,           // Disable command buffering - fail fast instead
+      // Buffering - Environment specific
+      bufferCommands: isServerless ? true : false,  // Enable buffering in serverless
+      bufferTimeoutMS: isServerless ? 30000 : 10000, // 30s buffer timeout for serverless
       autoCreate: true,                // Auto create collections
       
       // Performance
@@ -34,12 +38,14 @@ const connectDB = async () => {
       // Connection string options
       directConnection: false,         // Allow connection pooling
       family: 4,                       // Use IPv4
-    });
+    };
+    
+    const conn = await mongoose.connect(process.env.MONGODB_URI, connectionOptions);
 
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-    console.log(`📊 Connection Pool: min=${10}, max=${50}`);
-    console.log(`⏱️  Timeouts: server=${60}s, socket=${60}s, connect=${60}s`);
-    console.log(`🔄 Buffering: DISABLED (fail fast on connection issues)`);
+    console.log(`📊 Connection Pool: min=${isServerless ? 1 : 10}, max=${isServerless ? 10 : 50}`);
+    console.log(`⏱️  Timeouts: server=${30}s, socket=${45}s, connect=${30}s`);
+    console.log(`🔄 Buffering: ${isServerless ? 'ENABLED' : 'DISABLED'} (${isServerless ? 'buffering enabled' : 'fail fast on connection issues'})`);
 
     // Connection event handlers
     mongoose.connection.on('error', (err) => {
