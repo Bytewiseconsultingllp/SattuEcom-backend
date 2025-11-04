@@ -7,41 +7,78 @@ const connectDB = async () => {
   try {
     // Connection pooling and timeout configuration
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      // Connection pooling
-      maxPoolSize: 10,              // Maximum number of connections in the pool
-      minPoolSize: 5,               // Minimum number of connections to maintain
+      // Connection pooling - PRODUCTION OPTIMIZED
+      maxPoolSize: 50,              // Increased for production load
+      minPoolSize: 10,              // Maintain minimum connections
       
-      // Timeouts
-      serverSelectionTimeoutMS: 45000,  // Timeout for selecting a server (5 seconds)
-      socketTimeoutMS: 45000,          // Timeout for socket operations (45 seconds)
-      connectTimeoutMS: 45000,         // Timeout for initial connection (10 seconds)
+      // Timeouts - PRODUCTION OPTIMIZED
+      serverSelectionTimeoutMS: 60000,  // 60 seconds to select server
+      socketTimeoutMS: 60000,           // 60 seconds for socket operations
+      connectTimeoutMS: 60000,          // 60 seconds for initial connection
       
       // Retry logic
       retryWrites: true,               // Enable automatic retry for write operations
       retryReads: true,                // Enable automatic retry for read operations
       
       // Connection monitoring
-      heartbeatFrequencyMS: 45000,     // Heartbeat frequency (10 seconds)
+      heartbeatFrequencyMS: 30000,     // Heartbeat every 30 seconds
+      
+      // Buffering - CRITICAL FIX
+      bufferCommands: false,           // Disable command buffering - fail fast instead
+      autoCreate: true,                // Auto create collections
       
       // Performance
       useNewUrlParser: true,
       useUnifiedTopology: true,
+      
+      // Connection string options
+      directConnection: false,         // Allow connection pooling
+      family: 4,                       // Use IPv4
     });
- 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-    console.log(`Connection Pool: min=${5}, max=${10}`);
-    console.log(`Timeouts: server=${45}s, socket=${45}s, connect=${45}s`);
+
+    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
+    console.log(`📊 Connection Pool: min=${10}, max=${50}`);
+    console.log(`⏱️  Timeouts: server=${60}s, socket=${60}s, connect=${60}s`);
+    console.log(`🔄 Buffering: DISABLED (fail fast on connection issues)`);
+
+    // Connection event handlers
+    mongoose.connection.on('error', (err) => {
+      console.error('❌ MongoDB connection error:', err.message);
+    });
+
+    mongoose.connection.on('disconnected', () => {
+      console.warn('⚠️  MongoDB disconnected. Attempting to reconnect...');
+    });
+
+    mongoose.connection.on('reconnected', () => {
+      console.log('✅ MongoDB reconnected successfully');
+    });
+
+    mongoose.connection.on('close', () => {
+      console.log('🔌 MongoDB connection closed');
+    });
+
   } catch (error) {
-    console.error(`Error connecting to MongoDB: ${error.message}`);
-    console.error('\nPlease check your MongoDB connection string in the .env file');
-    console.error('Make sure it follows the correct format:\n');
-    console.error('For MongoDB Atlas:');
-    console.error('MONGODB_URI=mongodb+srv://username:password@cluster.xxxxx.mongodb.net/database_name\n');
-    console.error('For Local MongoDB:');
-    console.error('MONGODB_URI=mongodb://localhost:27017/ecommerce\n');
-    console.error('Note: Special characters in password should be URL encoded');
+    console.error(`❌ Error connecting to MongoDB: ${error.message}`);
+    console.error('\n🔍 Troubleshooting:');
+    console.error('1. Check MONGODB_URI in .env file');
+    console.error('2. Verify MongoDB Atlas IP whitelist');
+    console.error('3. Ensure cluster is running');
+    console.error('4. Check network connectivity\n');
+    
+    if (error.message.includes('timed out')) {
+      console.error('💡 Timeout detected - likely causes:');
+      console.error('   - IP not whitelisted in MongoDB Atlas');
+      console.error('   - Network connectivity issue');
+      console.error('   - MongoDB server is down\n');
+    } else if (error.message.includes('authentication failed')) {
+      console.error('💡 Authentication failed - likely causes:');
+      console.error('   - Wrong username/password');
+      console.error('   - User does not exist in MongoDB Atlas\n');
+    }
+    
     process.exit(1);
   }
 };
- 
+
 module.exports = connectDB;
