@@ -203,14 +203,12 @@ async function startServer() {
 const isServerless = process.env.LAMBDA_TASK_ROOT || process.env.VERCEL || process.env.NETLIFY;
 
 if (isServerless) {
-  // Serverless: Connect to DB immediately and export app
-  connectDB().catch(err => {
-    console.error('❌ MongoDB connection failed:', err.message);
-  });
-  
-  // Export for serverless platforms
+  // Serverless: Export app without starting server
+  // Use serverless.js for proper handler with DB connection
+  console.log('🔧 Running in serverless mode');
+  console.log('💡 Use serverless.js as entry point for proper DB connection handling');
   module.exports = app;
-  module.exports.handler = app;
+  module.exports.app = app;
 } else {
   // Traditional server: Start normally
   startServer();
