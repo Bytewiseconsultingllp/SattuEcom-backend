@@ -77,18 +77,23 @@ app.use(express.json({ limit: "20mb" }));
 app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 
 // Session middleware (required for OAuth)
-app.use(
-  session({
-    secret:
-      process.env.SESSION_SECRET || "your-secret-key-change-in-production",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 24 * 60 * 60 * 1000,
-    },
-  })
-);
+// Note: For production, consider using connect-mongo or connect-redis for session storage
+const sessionConfig = {
+  secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 24 * 60 * 60 * 1000,
+  },
+};
+
+// Suppress MemoryStore warning in serverless environments
+if (process.env.LAMBDA_TASK_ROOT || process.env.VERCEL || process.env.NETLIFY) {
+  sessionConfig.store = null; // Serverless doesn't need persistent sessions
+}
+
+app.use(session(sessionConfig));
 
 // Initialize Passport
 app.use(passport.initialize());
@@ -194,12 +199,28 @@ async function startServer() {
   }
 }
 
-// Start the server
-startServer();
+// Check if running in serverless environment
+const isServerless = process.env.LAMBDA_TASK_ROOT || process.env.VERCEL || process.env.NETLIFY;
+
+if (isServerless) {
+  // Serverless: Connect to DB immediately and export app
+  connectDB().catch(err => {
+    console.error('❌ MongoDB connection failed:', err.message);
+  });
+  
+  // Export for serverless platforms
+  module.exports = app;
+  module.exports.handler = app;
+} else {
+  // Traditional server: Start normally
+  startServer();
+}
 
 // Handle unhandled promise rejections
 process.on("unhandledRejection", (err) => {
   console.log("UNHANDLED REJECTION! Shutting down...");
   console.log(err.name, err.message);
-  process.exit(1);
+  if (!isServerless) {
+    process.exit(1);
+  }
 });
