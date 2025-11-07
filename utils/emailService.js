@@ -2,16 +2,35 @@ const nodemailer = require('nodemailer');
 const logger = require('./logger');
  
 // Create reusable transporter
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const smtpSecure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' ? true : smtpPort === 465;
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: false, // true for 465, false for other ports
+  port: smtpPort,
+  secure: smtpSecure, // 465=true, 587/25=false with STARTTLS
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASSWORD,
   },
+  requireTLS: !smtpSecure,
+  tls: {
+    minVersion: 'TLSv1.2',
+  },
+  logger: true,
+  debug: true
 });
- 
+
+// Verify transporter on startup for easier diagnostics
+(async () => {
+  try {
+    await transporter.verify();
+    logger.info('SMTP transporter verified', { host: process.env.SMTP_HOST, port: smtpPort, secure: smtpSecure });
+  } catch (err) {
+    logger.error('SMTP transporter verification failed', { message: err?.message, code: err?.code });
+  }
+})();
+
 /**
 * Send OTP email to user
 * @param {string} email - Recipient email
@@ -79,7 +98,7 @@ const sendOTPEmail = async (email, otp, type) => {
   }
  
   const mailOptions = {
-    from: `"E-commerce" <${process.env.SMTP_USER}>`,
+    from: `"${process.env.SMTP_FROM_NAME || 'E-commerce'}" <${process.env.SMTP_USER}>`,
     to: email,
     subject: subject,
     html: htmlContent,
@@ -148,10 +167,11 @@ function renderOrderHtml(order, extra = '') {
 }
 
 async function sendMailSafe({ to, subject, html }) {
-  const from = `"E-commerce" <${process.env.SMTP_USER}>`;
+  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
+  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
   try {
     logger.debug('sending email', { to, subject });
-    const info = await transporter.sendMail({ from, to, subject, html });
+    const info = await transporter.sendMail({ from, to, subject, html, headers: { 'X-Mailer': 'SattuEcom' } });
     logger.info('email sent', { to, subject, messageId: info.messageId, response: info.response });
     return true;
   } catch (error) {
@@ -181,6 +201,56 @@ async function sendOrderCancelledEmail(order, userEmail, reason) {
   ]);
 }
 
- 
-module.exports = { sendOTPEmail, sendOrderCreatedEmail, sendOrderCancelledEmail };
- 
+async function sendWelcomeEmail(email, name, tempPassword) {
+  const subject = 'Welcome to Grain Fusion - Your Account Created';
+  const resetUrl = `${process.env.FRONTEND_URL || ''}/forgot-password`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="margin: 0;">Welcome to Grain Fusion</h1>
+      </div>
+      <div style="padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 0 0 8px 8px;">
+        <p>Hi <strong>${name}</strong>,</p>
+        <p>Welcome to Grain Fusion! Your account has been successfully created.</p>
+        <div style="background-color: white; padding: 15px; border-left: 4px solid #667eea; margin: 20px 0;">
+          <p><strong>Your Login Credentials:</strong></p>
+          <p>Email: <code style="background: #f0f0f0; padding: 5px 10px;">${email}</code></p>
+          <p>Temporary Password: <code style="background: #f0f0f0; padding: 5px 10px;">${tempPassword}</code></p>
+        </div>
+        <p style="color: #666; font-size: 14px;">For security reasons, please reset your password on your first login.</p>
+        <a href="${resetUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0;">Reset Password</a>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">If you didn't create this account, please contact our support team.</p>
+      </div>
+    </div>
+  `;
+  return sendMailSafe({ to: email, subject, html });
+}
+
+// Optional: simple test helper to verify SMTP to any target inbox
+async function sendTestEmail(to, subject = 'SMTP Test', text = 'This is a test email from SattuEcom') {
+  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
+  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
+  return transporter.sendMail({ from, to, subject, text });
+}
+
+async function sendPasswordResetEmail(email, name) {
+  const subject = 'Set Your Password - Grain Fusion';
+  const resetUrl = `${process.env.FRONTEND_URL || ''}/forgot-password`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0;">
+        <h1 style="margin: 0;">Welcome to Grain Fusion</h1>
+      </div>
+      <div style="padding: 20px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 0 0 8px 8px;">
+        <p>Hi <strong>${name || 'there'}</strong>,</p>
+        <p>Your account has been created. For security, please set your password using the link below:</p>
+        <a href="${resetUrl}" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0;">Set/Reset Password</a>
+        <p style="color: #666; font-size: 14px;">This link takes you to the password reset page.</p>
+        <p style="color: #999; font-size: 12px; margin-top: 30px;">If you didn't request this, please ignore this email.</p>
+      </div>
+    </div>
+  `;
+  return sendMailSafe({ to: email, subject, html });
+}
+
+module.exports = { sendOTPEmail, sendOrderCreatedEmail, sendOrderCancelledEmail, sendWelcomeEmail, sendPasswordResetEmail, sendTestEmail };

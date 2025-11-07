@@ -304,7 +304,9 @@ const login = async (req, res) => {
     }
  
     // Check password
+    console.log("login passowd", password)
     const isPasswordMatch = await user.matchPassword(password);
+    console.log("hased password",isPasswordMatch);
     if (!isPasswordMatch) {
       return res.status(401).json({
         success: false,

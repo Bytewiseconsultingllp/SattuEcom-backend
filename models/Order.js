@@ -25,7 +25,7 @@ const orderSchema = new mongoose.Schema(
     shipping_address_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Address',
-      required: [true, 'Shipping address is required'],
+      required: [false, 'Shipping address is required'],
     },
 
     // NEW: cancellation metadata

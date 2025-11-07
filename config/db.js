@@ -28,7 +28,7 @@ const connectDB = async () => {
       
       // Buffering - Environment specific
       bufferCommands: isServerless ? true : false,  // Enable buffering in serverless
-      bufferTimeoutMS: isServerless ? 30000 : 10000, // 30s buffer timeout for serverless
+      // bufferTimeoutMS: isServerless ? 30000 : 10000, // 30s buffer timeout for serverless
       autoCreate: true,                // Auto create collections
       
       // Performance

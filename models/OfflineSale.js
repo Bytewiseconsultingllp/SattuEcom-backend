@@ -16,6 +16,12 @@ const offlineSaleSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Customer phone is required'],
     },
+    customerEmail: {
+      type: String,
+      required: [true, 'Customer email is required'],
+      lowercase: true,
+      trim: true,
+    },
     items: [
       {
         product: {
@@ -36,7 +42,28 @@ const offlineSaleSchema = new mongoose.Schema(
     ],
     totalAmount: {
       type: Number,
-      required: [true, 'Total amount is required'],
+      required: [false, 'Total amount is required'],
+      min: 0,
+    },
+    // GST Fields
+    gstType: {
+      type: String,
+      enum: ['gst', 'non-gst'],
+      default: 'non-gst',
+    },
+    invoiceNumber: {
+      type: String,
+      default: '',
+    },
+    // Discount Field
+    discount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    finalAmount: {
+      type: Number,
+      required: [true, 'Final amount is required'],
       min: 0,
     },
     paymentMethod: {
