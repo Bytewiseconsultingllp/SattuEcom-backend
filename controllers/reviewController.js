@@ -216,8 +216,16 @@ exports.getUserReviews = async (req, res, next) => {
 //     next(error);
 //   }
 // };
-function isValidBase64Image(s) {
-  return typeof s === 'string' && s.startsWith('data:image/') && s.includes(';base64,');
+// Validate image URL (supports both base64 and Cloudinary URLs)
+function isValidImageUrl(s) {
+  if (typeof s !== 'string') return false;
+  // Accept base64 images
+  if (s.startsWith('data:image/') && s.includes(';base64,')) return true;
+  // Accept Cloudinary URLs
+  if (s.includes('cloudinary.com') || s.startsWith('https://res.cloudinary.com')) return true;
+  // Accept other valid URLs
+  if (s.startsWith('http://') || s.startsWith('https://')) return true;
+  return false;
 }
 
 exports.createReview = async (req, res, next) => {
@@ -243,7 +251,7 @@ exports.createReview = async (req, res, next) => {
 
     const MAX_IMAGES = 6;
     const imgs = Array.isArray(images) ? images : [];
-    const validImages = imgs.filter(isValidBase64Image).slice(0, MAX_IMAGES);
+    const validImages = imgs.filter(isValidImageUrl).slice(0, MAX_IMAGES);
 
     console.log("about to create the review ")
     const review = await Review.create({
@@ -296,7 +304,7 @@ exports.updateReview = async (req, res, next) => {
 
     const MAX_IMAGES = 6;
     if (Array.isArray(images)) {
-      const validImages = images.filter(isValidBase64Image);
+      const validImages = images.filter(isValidImageUrl);
       if (image_action === 'append') {
         const combined = [...(review.images || []), ...validImages];
         review.images = combined.slice(0, MAX_IMAGES);
