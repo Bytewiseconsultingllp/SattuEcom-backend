@@ -25,11 +25,14 @@ const paymentRoutes = require('./routes/payments');
 const adminPaymentRoutes = require('./routes/adminPayments');
 const webhookRoutes = require('./routes/webhooks');
 const bannerRoutes = require('./routes/bannerRoutes');
+const giftDesignRoutes = require('./routes/giftDesignRoutes');
+const customGiftRequestRoutes = require('./routes/customGiftRequestRoutes');
 const offlineSaleRoutes = require('./routes/offlineSaleRoutes');
 const expenseRoutes = require('./routes/expenseRoutes');
 const companySettingsRoutes = require('./routes/companySettingsRoutes');
 const contactQueryRoutes = require('./routes/contactQueryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
+const uploadRoutes = require('./routes/uploadRoutes');
 
 // Initialize express app
 const app = express();
@@ -151,6 +154,12 @@ app.use("/api/admin/coupons", adminCouponRoutes);
 // Banner routes
 app.use("/api/banners", bannerRoutes);
 
+// Gift routes
+app.use('/api/gifts', giftDesignRoutes);
+app.use('/api/admin/gifts', giftDesignRoutes.adminRoutes());
+app.use('/api/custom-gifts', customGiftRequestRoutes);
+app.use('/api/admin/custom-gifts', customGiftRequestRoutes.adminRoutes());
+
 // Offline Sales routes
 app.use("/api/admin/offline-sales", offlineSaleRoutes);
 
@@ -165,6 +174,9 @@ app.use("/api/contact-queries", contactQueryRoutes);
 
 // Dashboard routes (NEW)
 app.use("/api/admin/dashboard", dashboardRoutes);
+
+// Upload routes (Cloudinary)
+app.use("/api/upload", uploadRoutes);
 
 // Health check
 app.use("/health", healthRoutes);

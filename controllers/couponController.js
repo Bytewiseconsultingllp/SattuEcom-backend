@@ -1,76 +1,116 @@
 const Coupon = require('../models/Coupon');
+const { isUsable, computeDiscount } = require('../utils/coupon');
 
+/**
+ * Get all active and usable coupons (not expired, not limit reached, active)
+ */
 exports.getActiveCoupons = async (req, res, next) => {
   try {
     const coupons = await Coupon.find({ is_active: true }).lean();
-    res.json({ success: true, data: coupons.map(c => ({ ...c, id: c._id.toString() })) });
+    
+    // Filter out expired/limit-reached coupons on server
+    const usable = coupons.filter(isUsable);
+    
+    res.json({ 
+      success: true, 
+      data: usable.map(c => ({ 
+        ...c, 
+        id: c._id.toString(),
+        _id: undefined 
+      })) 
+    });
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * Validate coupon without incrementing usage (quick check)
+ */
 exports.validateCoupon = async (req, res, next) => {
   try {
     const { code, cart_total } = req.body;
-    const coupon = await Coupon.findOne({ code: code.toUpperCase(), is_active: true });
+    const coupon = await Coupon.findOne({ code: String(code || '').toUpperCase().trim() });
     
-    if (!coupon) return res.json({ success: true, data: { valid: false, message: 'Invalid coupon' }});
-    
-    const now = new Date();
-    if (coupon.start_date && now < coupon.start_date) 
-      return res.json({ success: true, data: { valid: false, message: 'Coupon not yet active' }});
-    if (coupon.end_date && now > coupon.end_date) 
-      return res.json({ success: true, data: { valid: false, message: 'Coupon expired' }});
-    if (coupon.usage_limit > 0 && coupon.usage_count >= coupon.usage_limit) 
-      return res.json({ success: true, data: { valid: false, message: 'Usage limit reached' }});
-    if (cart_total < coupon.min_purchase_amount) 
-      return res.json({ success: true, data: { valid: false, message: `Min ₹${coupon.min_purchase_amount} required` }});
-    
-    let discount = 0;
-    if (coupon.type === 'percentage') {
-      discount = (cart_total * coupon.discount_value) / 100;
-      if (coupon.max_discount_amount) discount = Math.min(discount, coupon.max_discount_amount);
-    } else if (coupon.type === 'fixed') {
-      discount = Math.min(coupon.discount_value, cart_total);
+    if (!coupon || !isUsable(coupon)) {
+      return res.json({ 
+        success: true, 
+        data: { 
+          valid: false, 
+          message: 'Invalid or unavailable coupon' 
+        } 
+      });
     }
     
-    res.json({ success: true, data: { valid: true, coupon, discount_amount: discount }});
+    // Check minimum purchase amount
+    if (coupon.min_purchase_amount && Number(cart_total) < coupon.min_purchase_amount) {
+      return res.json({ 
+        success: true, 
+        data: { 
+          valid: false, 
+          message: `Minimum ₹${coupon.min_purchase_amount} required` 
+        } 
+      });
+    }
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        valid: true, 
+        coupon: { ...coupon.toObject(), id: coupon._id.toString(), _id: undefined },
+        message: 'Coupon is valid' 
+      } 
+    });
   } catch (error) {
     next(error);
   }
 };
 
+/**
+ * Apply coupon and compute discount (does NOT increment usage; that happens on order creation)
+ */
 exports.applyCoupon = async (req, res, next) => {
   try {
     const { code, cart_items } = req.body;
-    const coupon = await Coupon.findOne({ code: code.toUpperCase(), is_active: true });
     
-    if (!coupon) return res.status(400).json({ success: false, message: 'Invalid coupon' });
+    if (!Array.isArray(cart_items) || cart_items.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Cart items are required' 
+      });
+    }
+
+    const coupon = await Coupon.findOne({ code: String(code || '').toUpperCase().trim() });
     
-    const cart_total = cart_items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    
-    let discount = 0;
-    if (coupon.type === 'percentage') {
-      discount = (cart_total * coupon.discount_value) / 100;
-      if (coupon.max_discount_amount) discount = Math.min(discount, coupon.max_discount_amount);
-    } else if (coupon.type === 'fixed') {
-      discount = Math.min(coupon.discount_value, cart_total);
-    } else if (coupon.type === 'buy_x_get_y') {
-      const sorted = [...cart_items].sort((a, b) => a.price - b.price);
-      const totalQty = cart_items.reduce((sum, item) => sum + item.quantity, 0);
-      let freeItems = Math.floor(totalQty / (coupon.buy_quantity + coupon.get_quantity)) * coupon.get_quantity;
-      for (const item of sorted) {
-        if (freeItems <= 0) break;
-        const toDiscount = Math.min(item.quantity, freeItems);
-        discount += item.price * toDiscount;
-        freeItems -= toDiscount;
-      }
+    if (!coupon || !isUsable(coupon)) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Invalid or unavailable coupon' 
+      });
     }
     
-    coupon.usage_count += 1;
-    await coupon.save();
+    const cart_total = cart_items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
     
-    res.json({ success: true, data: { coupon, discount_amount: discount, final_amount: cart_total - discount }});
+    // Check minimum purchase amount
+    if (coupon.min_purchase_amount && cart_total < coupon.min_purchase_amount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Minimum ₹${coupon.min_purchase_amount} required` 
+      });
+    }
+    
+    // Compute discount using utility function
+    const discount_amount = computeDiscount(cart_items, coupon);
+    const final_amount = Math.max(0, cart_total - discount_amount);
+    
+    res.json({ 
+      success: true, 
+      data: { 
+        coupon: { ...coupon.toObject(), id: coupon._id.toString(), _id: undefined },
+        discount_amount, 
+        final_amount 
+      } 
+    });
   } catch (error) {
     next(error);
   }

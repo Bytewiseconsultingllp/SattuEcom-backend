@@ -52,6 +52,16 @@ const orderSchema = new mongoose.Schema(
         default: null,
       },
     },
+
+    // Coupon details
+    coupon_code: { type: String, default: null },
+    discount_amount: { type: Number, default: 0, min: 0 },
+
+    // Gift wrapping details
+    gift_design_id: { type: mongoose.Schema.Types.ObjectId, ref: 'GiftDesign', default: null },
+    gift_price: { type: Number, default: 0, min: 0 },
+    gift_card_message: String,
+    gift_wrapping_type: String, // "single_product" or "combo"
   },
   {
     timestamps: true,

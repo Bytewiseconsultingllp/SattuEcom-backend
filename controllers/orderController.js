@@ -3,6 +3,8 @@ const OrderItem = require("../models/OrderItem");
 const Address = require("../models/Address");
 const Product = require("../models/Product");
 const CartItem = require("../models/CartItem");
+const Coupon = require("../models/Coupon");
+const { computeDiscount, isUsable } = require("../utils/coupon");
 const {
   sendOrderCreatedEmail,
   sendOrderCancelledEmail,
@@ -219,7 +221,7 @@ exports.getOrderById = async (req, res, next) => {
 exports.createOrder = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { total_amount, shipping_address_id, items } = req.body;
+    const { total_amount, shipping_address_id, items, coupon_code, gift_design_id, gift_price, gift_card_message, gift_wrapping_type } = req.body;
 
     // Validate required fields
     if (!total_amount || !shipping_address_id || !items || items.length === 0) {
@@ -253,12 +255,37 @@ exports.createOrder = async (req, res, next) => {
       });
     }
 
-    // Create order
+    // Server-side coupon validation and discount computation
+    let discount_amount = 0;
+    let couponUsed = null;
+
+    if (coupon_code) {
+      const coupon = await Coupon.findOne({ 
+        code: String(coupon_code).toUpperCase().trim() 
+      });
+
+      if (coupon && isUsable(coupon)) {
+        // Recompute discount server-side to prevent tampering
+        discount_amount = computeDiscount(items, coupon);
+        couponUsed = coupon;
+      }
+    }
+
+    // Compute final total with discount
+    const finalTotal = Math.max(0, total_amount - discount_amount);
+
+    // Create order with coupon details
     const order = await Order.create({
       user_id: userId,
-      total_amount,
+      total_amount: finalTotal,
       shipping_address_id,
       status: "pending",
+      coupon_code: couponUsed ? couponUsed.code : null,
+      discount_amount: discount_amount || 0,
+      gift_design_id: gift_design_id || null,
+      gift_price: gift_price || 0,
+      gift_card_message: gift_card_message || undefined,
+      gift_wrapping_type: gift_wrapping_type || undefined,
     });
 
     // Create order items
@@ -273,6 +300,17 @@ exports.createOrder = async (req, res, next) => {
 
     // Clear user's cart after successful order
     await CartItem.deleteMany({ user_id: userId });
+
+    // Increment coupon usage count if coupon was used
+    if (couponUsed) {
+      await Coupon.updateOne(
+        { _id: couponUsed._id },
+        { $inc: { usage_count: 1 } }
+      ).catch(err => {
+        // Log but don't fail the order if coupon update fails
+        console.error('Failed to increment coupon usage:', err.message);
+      });
+    }
 
     // Re-fetch populated order to include items+product+address for the email/template
     const populatedOrder = await Order.findById(order._id)
