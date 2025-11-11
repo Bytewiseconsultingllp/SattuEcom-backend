@@ -4,11 +4,13 @@ const Address = require("../models/Address");
 const Product = require("../models/Product");
 const CartItem = require("../models/CartItem");
 const Coupon = require("../models/Coupon");
+const Payment = require("../models/Payment");
 const { computeDiscount, isUsable } = require("../utils/coupon");
 const {
   sendOrderCreatedEmail,
   sendOrderCancelledEmail,
 } = require("../utils/emailService");
+const { createInvoiceFromOrder } = require("./invoiceController");
 /**
  * Get all orders for a user with nested order_items, products, and shipping address
  * Matches Supabase getOrders function
@@ -100,6 +102,12 @@ exports.getOrders = async (req, res, next) => {
       };
 
       if (shipping_address) out.shipping_address = shipping_address;
+      
+      // Include invoice data if available
+      if (order.invoice_id) {
+        out.invoice_id = order.invoice_id.toString();
+        out.invoice_number = order.invoice_number;
+      }
 
       // cleanup mongo internals
       delete out._id;
@@ -198,6 +206,13 @@ exports.getOrderById = async (req, res, next) => {
     order.user_id = order.user_id.toString();
     order.created_at = order.createdAt;
     order.updated_at = order.updatedAt;
+    
+    // Include invoice data if available
+    if (order.invoice_id) {
+      order.invoice_id = order.invoice_id.toString();
+      // invoice_number is already a string, keep it as is
+    }
+    
     delete order._id;
     delete order.createdAt;
     delete order.updatedAt;
@@ -215,13 +230,160 @@ exports.getOrderById = async (req, res, next) => {
 };
 
 /**
+ * Get order confirmation with accurate payment summary
+ * Returns all payment details for order confirmation page
+ */
+exports.getOrderConfirmation = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const orderId = req.params.id;
+
+    // Fetch order with all details
+    const order = await Order.findOne({ _id: orderId, user_id: userId })
+      .populate("shipping_address_id")
+      .lean();
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Fetch order items with product details
+    const orderItems = await OrderItem.find({ order_id: order._id })
+      .populate("product_id")
+      .lean();
+
+    // Calculate subtotal from items
+    const subtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+    // Get all payment components from order
+    const discountAmount = order.discount_amount || 0;
+    const couponDiscount = order.discount_amount || 0;
+    const giftPrice = order.gift_price || 0;
+    const deliveryCharges = order.delivery_charges || 0;
+    const taxAmount = order.tax_amount || 0;
+
+    // Calculate subtotal after discounts
+    const subtotalAfterDiscount = subtotal - discountAmount - couponDiscount + giftPrice;
+
+    // Use stored tax or calculate 5% GST
+    let gstAmount = taxAmount;
+    if (gstAmount === 0) {
+      gstAmount = (subtotalAfterDiscount * 5) / 100;
+    }
+
+    // Calculate final total
+    const finalTotal = subtotalAfterDiscount + gstAmount + deliveryCharges;
+
+    // Format order items
+    const items = orderItems.map((item) => ({
+      id: item._id.toString(),
+      product_id: item.product_id._id.toString(),
+      name: item.product_id.name,
+      description: item.product_id.description,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.price * item.quantity,
+      images: item.product_id.images,
+    }));
+
+    // Format shipping address
+    let shippingAddress = null;
+    if (order.shipping_address_id) {
+      shippingAddress = {
+        id: order.shipping_address_id._id.toString(),
+        full_name: order.shipping_address_id.full_name,
+        phone: order.shipping_address_id.phone,
+        address_line1: order.shipping_address_id.address_line1,
+        address_line2: order.shipping_address_id.address_line2,
+        city: order.shipping_address_id.city,
+        state: order.shipping_address_id.state,
+        postal_code: order.shipping_address_id.postal_code,
+        country: order.shipping_address_id.country,
+      };
+    }
+
+    // Build confirmation response with accurate payment summary
+    const confirmationData = {
+      order_id: order._id.toString(),
+      order_number: order.order_number || order._id.toString(),
+      status: order.status,
+      created_at: order.createdAt,
+      
+      // Items
+      items: items,
+      items_count: items.length,
+      items_quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+
+      // Payment Summary (Accurate)
+      payment_summary: {
+        subtotal: subtotal,
+        discount: discountAmount,
+        coupon_discount: couponDiscount,
+        gift_price: giftPrice,
+        delivery_charges: deliveryCharges,
+        delivery_type: order.delivery_type || 'standard',
+        tax: gstAmount,
+        tax_rate: 5,
+        total: finalTotal,
+      },
+
+      // Order Details
+      coupon_code: order.coupon_code || null,
+      gift_design_id: order.gift_design_id?.toString() || null,
+      gift_card_message: order.gift_card_message || null,
+      
+      // Shipping
+      shipping_address: shippingAddress,
+
+      // Invoice
+      invoice_id: order.invoice_id?.toString() || null,
+      invoice_number: order.invoice_number || null,
+
+      // Payment Status
+      payment_status: order.payment_status || 'pending',
+      payment_method: order.payment_method || null,
+    };
+
+    return res.status(200).json({
+      success: true,
+      data: confirmationData,
+    });
+  } catch (error) {
+    if (error.kind === "ObjectId") {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+    next(error);
+  }
+};
+
+/**
  * Create order with items
  * Matches Supabase createOrder function
  */
 exports.createOrder = async (req, res, next) => {
   try {
     const userId = req.user._id;
-    const { total_amount, shipping_address_id, items, coupon_code, gift_design_id, gift_price, gift_card_message, gift_wrapping_type } = req.body;
+    const { 
+      total_amount, 
+      shipping_address_id, 
+      items, 
+      coupon_code, 
+      gift_design_id, 
+      gift_price, 
+      gift_card_message, 
+      gift_wrapping_type,
+      delivery_charges,     // Delivery charges from checkout
+      delivery_type,        // "standard", "express", etc.
+      tax_amount,           // Tax amount from checkout
+      razorpay_payment_id,  // For online payments
+      razorpay_order_id     // For online payments
+    } = req.body;
 
     // Validate required fields
     if (!total_amount || !shipping_address_id || !items || items.length === 0) {
@@ -271,10 +433,11 @@ exports.createOrder = async (req, res, next) => {
       }
     }
 
-    // Compute final total with discount
-    const finalTotal = Math.max(0, total_amount - discount_amount);
+    // Use total_amount as-is (already calculated on frontend with all charges/discounts)
+    // Only recompute discount server-side for security, but don't subtract again from total
+    const finalTotal = Math.max(0, total_amount);
 
-    // Create order with coupon details
+    // Create order with all payment details
     const order = await Order.create({
       user_id: userId,
       total_amount: finalTotal,
@@ -282,6 +445,9 @@ exports.createOrder = async (req, res, next) => {
       status: "pending",
       coupon_code: couponUsed ? couponUsed.code : null,
       discount_amount: discount_amount || 0,
+      delivery_charges: delivery_charges || 0,
+      delivery_type: delivery_type || 'standard',
+      tax_amount: tax_amount || 0,
       gift_design_id: gift_design_id || null,
       gift_price: gift_price || 0,
       gift_card_message: gift_card_message || undefined,
@@ -372,18 +538,80 @@ exports.createOrder = async (req, res, next) => {
       await sendOrderCreatedEmail(populatedOrder, userEmail);
     } catch (e) {
       // don't fail the API if email fails; log it
-      logger.error("sendOrderCreatedEmail failed", { message: e?.message });
+      console.error("sendOrderCreatedEmail failed", { message: e?.message });
     }
 
-    // // Return formatted order
-    // const formattedOrder = order.toObject();
-    // formattedOrder.id = formattedOrder._id;
-    // delete formattedOrder._id;
-    // delete formattedOrder.__v;
-    // formattedOrder.created_at = formattedOrder.createdAt;
-    // formattedOrder.updated_at = formattedOrder.updatedAt;
-    // delete formattedOrder.createdAt;
-    // delete formattedOrder.updatedAt;
+    // Create invoice for the order with payment tracking
+    let invoice = null;
+    try {
+      // Fetch payment data if this is an online order
+      let paymentData = null;
+      if (razorpay_payment_id) {
+        paymentData = await Payment.findOne({ 
+          razorpay_payment_id: razorpay_payment_id 
+        }).lean();
+        
+        // If payment not found but payment ID provided, create basic payment object
+        if (!paymentData) {
+          paymentData = {
+            razorpay_payment_id: razorpay_payment_id,
+            razorpay_order_id: razorpay_order_id,
+            status: 'captured', // Assume captured if payment ID exists
+            payment_method: req.body.payment_method || 'razorpay',
+          };
+        }
+      }
+
+      // Calculate subtotal (before any discounts or additions)
+      const itemsSubtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      
+      // Use provided tax_amount or calculate GST (5% on subtotal after discounts)
+      let gstAmount = tax_amount || 0;
+      if (gstAmount === 0) {
+        const subtotalAfterDiscount = itemsSubtotal - (discount_amount || 0);
+        gstAmount = (subtotalAfterDiscount * 5) / 100;
+      }
+
+      const invoiceData = {
+        user_id: userId,
+        items: orderItems.map(item => ({
+          product_id: item.product_id._id,
+          name: item.product_id.name,
+          description: item.product_id.description,
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        subtotal: itemsSubtotal,
+        tax: 0,
+        discount_amount: discount_amount || 0,
+        coupon_discount: discount_amount || 0,  // Coupon discount (same as discount_amount from server-side validation)
+        gift_price: gift_price || 0,
+        shipping_charges: delivery_charges || 0,
+        delivery_charges: delivery_charges || 0,
+        gst_amount: gstAmount,
+        total_amount: finalTotal,
+        payment_status: paymentData ? 'completed' : 'pending',
+        payment_method: paymentData ? (paymentData.payment_method || 'razorpay') : 'pending',
+        billing_address: populatedOrder.shipping_address,
+        shipping_address: populatedOrder.shipping_address,
+        notes: 'Thank you for your order!',
+      };
+
+      // Pass payment data to invoice creation (null for offline orders)
+      invoice = await createInvoiceFromOrder(order._id, invoiceData, paymentData);
+      
+      // Save invoice reference to order
+      order.invoice_id = invoice._id;
+      order.invoice_number = invoice.invoiceNumber;
+      await order.save();
+      
+      // Add to response
+      populatedOrder.invoice_id = invoice._id.toString();
+      populatedOrder.invoice_number = invoice.invoiceNumber;
+    } catch (e) {
+      // don't fail the order if invoice creation fails; log it
+      console.error("Invoice creation failed", { message: e?.message, stack: e?.stack });
+    }
 
     res.status(201).json({
       success: true,

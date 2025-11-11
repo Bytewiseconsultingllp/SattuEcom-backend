@@ -7,6 +7,7 @@ const {
   updateOrderStatus,
   getAllOrders,
   cancelOrder,
+  getOrderConfirmation,
 } = require('../controllers/orderController');
 const { protect } = require('../middleware/auth');
  
@@ -157,6 +158,40 @@ router.get('/all', getAllOrders);
 *         description: Unauthorized
 */
 router.get('/:id', getOrderById);
+
+/**
+* @swagger
+* /api/orders/{id}/confirmation:
+*   get:
+*     summary: Get order confirmation with accurate payment summary
+*     tags: [Orders]
+*     security:
+*       - bearerAuth: []
+*     parameters:
+*       - in: path
+*         name: id
+*         required: true
+*         schema:
+*           type: string
+*         description: Order ID
+*     responses:
+*       200:
+*         description: Order confirmation with accurate payment summary
+*         content:
+*           application/json:
+*             schema:
+*               type: object
+*               properties:
+*                 success:
+*                   type: boolean
+*                 data:
+*                   type: object
+*       404:
+*         description: Order not found
+*       401:
+*         description: Unauthorized
+*/
+router.get('/:id/confirmation', getOrderConfirmation);
  
 /**
 * @swagger

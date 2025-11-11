@@ -57,11 +57,23 @@ const orderSchema = new mongoose.Schema(
     coupon_code: { type: String, default: null },
     discount_amount: { type: Number, default: 0, min: 0 },
 
+    // Delivery details
+    delivery_charges: { type: Number, default: 0, min: 0 },
+    delivery_type: { type: String, default: 'standard' }, // "standard", "express", etc.
+
     // Gift wrapping details
     gift_design_id: { type: mongoose.Schema.Types.ObjectId, ref: 'GiftDesign', default: null },
     gift_price: { type: Number, default: 0, min: 0 },
     gift_card_message: String,
     gift_wrapping_type: String, // "single_product" or "combo"
+
+    // Tax details
+    tax_amount: { type: Number, default: 0, min: 0 },
+    tax_rate: { type: Number, default: 5, min: 0 }, // 5% GST
+
+    // Invoice details
+    invoice_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
+    invoice_number: { type: String, default: null },
   },
   {
     timestamps: true,

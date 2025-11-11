@@ -36,6 +36,14 @@ const companySettingsSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    website: {
+      type: String,
+      default: '',
+    },
+    placeOfSupply: {
+      type: String,
+      default: '',
+    },
     bankName: {
       type: String,
       default: '',
@@ -48,7 +56,15 @@ const companySettingsSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    branchName: {
+      type: String,
+      default: '',
+    },
     accountHolderName: {
+      type: String,
+      default: '',
+    },
+    upiId: {
       type: String,
       default: '',
     },

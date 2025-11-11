@@ -40,10 +40,14 @@ exports.updateCompanySettings = async (req, res, next) => {
       address,
       gstNumber,
       panNumber,
+      website,
+      placeOfSupply,
       bankName,
       accountNumber,
       ifscCode,
+      branchName,
       accountHolderName,
+      upiId,
       logo,
       signature,
     } = req.body;
@@ -59,10 +63,14 @@ exports.updateCompanySettings = async (req, res, next) => {
         address: address || '',
         gstNumber: gstNumber || '',
         panNumber: panNumber || '',
+        website: website || '',
+        placeOfSupply: placeOfSupply || '',
         bankName: bankName || '',
         accountNumber: accountNumber || '',
         ifscCode: ifscCode || '',
+        branchName: branchName || '',
         accountHolderName: accountHolderName || '',
+        upiId: upiId || '',
         logo: logo || '',
         signature: signature || '',
       });
@@ -74,10 +82,14 @@ exports.updateCompanySettings = async (req, res, next) => {
       if (address) settings.address = address;
       if (gstNumber !== undefined) settings.gstNumber = gstNumber;
       if (panNumber !== undefined) settings.panNumber = panNumber;
+      if (website !== undefined) settings.website = website;
+      if (placeOfSupply !== undefined) settings.placeOfSupply = placeOfSupply;
       if (bankName !== undefined) settings.bankName = bankName;
       if (accountNumber !== undefined) settings.accountNumber = accountNumber;
       if (ifscCode !== undefined) settings.ifscCode = ifscCode;
+      if (branchName !== undefined) settings.branchName = branchName;
       if (accountHolderName !== undefined) settings.accountHolderName = accountHolderName;
+      if (upiId !== undefined) settings.upiId = upiId;
       if (logo !== undefined) settings.logo = logo;
       if (signature !== undefined) settings.signature = signature;
 

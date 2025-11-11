@@ -33,6 +33,7 @@ const companySettingsRoutes = require('./routes/companySettingsRoutes');
 const contactQueryRoutes = require('./routes/contactQueryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
+const invoiceRoutes = require('./routes/invoiceRoutes');
 
 // Initialize express app
 const app = express();
@@ -177,6 +178,9 @@ app.use("/api/admin/dashboard", dashboardRoutes);
 
 // Upload routes (Cloudinary)
 app.use("/api/upload", uploadRoutes);
+
+// Invoice routes
+app.use("/api/invoices", invoiceRoutes);
 
 // Health check
 app.use("/health", healthRoutes);
