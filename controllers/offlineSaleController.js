@@ -3,6 +3,7 @@ const User = require('../models/User');
 const Order = require('../models/Order');
 const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../utils/emailService');
+const { createInvoiceFromOrder } = require('./invoiceController');
 
 // Generate random password
 const generatePassword = () => crypto.randomBytes(8).toString('hex');
@@ -198,7 +199,7 @@ exports.getOfflineSaleById = async (req, res, next) => {
  */
 exports.createOfflineSale = async (req, res, next) => {
   try {
-    const { date, customerName, customerPhone, customerEmail, items, totalAmount, finalAmount, discount, gstType, invoiceNumber, paymentMethod, notes } = req.body;
+    const { date, customerName, customerPhone, customerEmail, items, totalAmount, finalAmount, discount, gstType, paymentMethod, notes } = req.body;
 
     if (!customerName || !customerPhone || !customerEmail || !items || items.length === 0 || !totalAmount) {
       return res.status(400).json({
@@ -207,13 +208,8 @@ exports.createOfflineSale = async (req, res, next) => {
       });
     }
 
-    // Validate GST invoice number if GST type is selected
-    if (gstType === 'gst' && !invoiceNumber) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invoice number is required for GST sales',
-      });
-    }
+    const parsedTotalAmount = Number(totalAmount) || 0;
+    const parsedFinalAmount = finalAmount !== undefined ? Number(finalAmount) : parsedTotalAmount;
 
     const sale = await OfflineSale.create({
       date: date ? new Date(date) : new Date(),
@@ -221,11 +217,10 @@ exports.createOfflineSale = async (req, res, next) => {
       customerPhone,
       customerEmail,
       items,
-      totalAmount,
-      finalAmount: finalAmount || totalAmount,
+      totalAmount: parsedTotalAmount,
+      finalAmount: parsedFinalAmount,
       discount: discount || 0,
       gstType: gstType || 'non-gst',
-      invoiceNumber: invoiceNumber || '',
       paymentMethod: paymentMethod || 'cash',
       notes: notes || '',
     });
@@ -260,9 +255,57 @@ exports.createOfflineSale = async (req, res, next) => {
     // Create order from offline sale (minimal fields per Order schema)
     const order = await Order.create({
       user_id: user._id,
-      total_amount: finalAmount || totalAmount,
+      total_amount: parsedFinalAmount || parsedTotalAmount,
       status: 'delivered',
     });
+
+    let invoice = null;
+    if ((sale.gstType || '').toLowerCase() === 'gst') {
+      try {
+        const invoicePayload = {
+          user_id: user._id,
+          items: (sale.items || []).map((item) => ({
+            product_name: item.product,
+            name: item.product,
+            description: item.description || '',
+            quantity: item.quantity,
+            price: item.price,
+          })),
+          subtotal: sale.totalAmount,
+          discount_amount: sale.discount || 0,
+          coupon_discount: 0,
+          gift_price: 0,
+          shipping_charges: 0,
+          delivery_charges: 0,
+          gst_amount: sale.tax || 0,
+          total_amount: sale.finalAmount,
+          payment_method: sale.paymentMethod || paymentMethod || 'cash',
+          billing_address: {
+            fullName: sale.customerName,
+            phone: sale.customerPhone,
+            addressLine1: 'Offline sale purchase',
+          },
+          shipping_address: {
+            fullName: sale.customerName,
+            phone: sale.customerPhone,
+            addressLine1: 'Offline sale purchase',
+          },
+          notes: sale.notes || 'Thank you for your purchase!',
+          sale_type:'offline',
+        };
+
+        invoice = await createInvoiceFromOrder(order._id, invoicePayload, null);
+
+        order.invoice_id = invoice._id;
+        order.invoice_number = invoice.invoiceNumber;
+        await order.save();
+      } catch (invoiceError) {
+        console.error('Failed to create invoice for offline sale', {
+          message: invoiceError?.message,
+          stack: invoiceError?.stack,
+        });
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -270,6 +313,12 @@ exports.createOfflineSale = async (req, res, next) => {
         sale,
         customer: user,
         order,
+        invoice: invoice
+          ? {
+              id: invoice._id.toString(),
+              invoiceNumber: invoice.invoiceNumber,
+            }
+          : null,
         isNewCustomer,
       },
       message: isNewCustomer 
@@ -293,15 +342,7 @@ exports.createOfflineSale = async (req, res, next) => {
  */
 exports.updateOfflineSale = async (req, res, next) => {
   try {
-    const { date, customerName, customerPhone, customerEmail, items, totalAmount, finalAmount, discount, gstType, invoiceNumber, paymentMethod, notes } = req.body;
-
-    // Validate GST invoice number if GST type is selected
-    if (gstType === 'gst' && !invoiceNumber) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invoice number is required for GST sales',
-      });
-    }
+    const { date, customerName, customerPhone, customerEmail, items, totalAmount, finalAmount, discount, gstType, paymentMethod, notes } = req.body;
 
     const updateData = {};
     if (date) updateData.date = new Date(date);
@@ -313,7 +354,6 @@ exports.updateOfflineSale = async (req, res, next) => {
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (discount !== undefined) updateData.discount = discount;
     if (gstType) updateData.gstType = gstType;
-    if (invoiceNumber !== undefined) updateData.invoiceNumber = invoiceNumber;
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
     if (notes !== undefined) updateData.notes = notes;
 

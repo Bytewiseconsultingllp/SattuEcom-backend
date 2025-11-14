@@ -63,6 +63,11 @@ const paymentSchema = new mongoose.Schema(
       enum: ['none', 'pending', 'processed', 'failed'],
       default: 'none',
     },
+    // Sale type for tracking (online/offline)
+    sale_type: {
+      type: String,
+      enum: ['online', 'offline'],
+    },
     error_code: {
       type: String,
     },

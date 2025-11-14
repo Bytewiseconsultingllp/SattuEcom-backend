@@ -71,6 +71,14 @@ const orderSchema = new mongoose.Schema(
     tax_amount: { type: Number, default: 0, min: 0 },
     tax_rate: { type: Number, default: 5, min: 0 }, // 5% GST
 
+    // Sale type (online vs offline)
+    sale_type: {
+      type: String,
+      enum: ['online', 'offline'],
+      default: 'online',
+      index: true,
+    },
+
     // Invoice details
     invoice_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
     invoice_number: { type: String, default: null },

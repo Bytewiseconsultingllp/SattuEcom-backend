@@ -7,82 +7,135 @@ const { generateInvoicePDF } = require('../utils/pdfGenerator');
 /**
  * Create invoice from order
  */
+// createInvoiceFromOrder (fixed)
 exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) => {
   try {
     // Generate invoice number
     const invoiceNumber = await Invoice.generateInvoiceNumber();
 
-    // Calculate due date (30 days from issue date)
+    // Dates
     const issueDate = new Date();
     const dueDate = new Date(issueDate);
     dueDate.setDate(dueDate.getDate() + 30);
 
-    // Prepare invoice items from order items
+    // Normalize sale type: trust explicit orderData.sale_type if provided; otherwise default to 'online' (backwards compatible).
+    let saleTypeRaw = (orderData.sale_type).toString().trim().toLowerCase();
+    let saleType = (saleTypeRaw === 'offline' || saleTypeRaw === 'online') ? saleTypeRaw : 'online';
+    const isOnlineSale = saleType === 'online';
+    const isOfflineSale = saleType === 'offline';
+
+    // Items (map compatible shapes)
     const items = (orderData.items || []).map(item => ({
       productId: item.product_id || item.productId,
       name: item.name || item.product_name,
       description: item.description,
-      quantity: item.quantity,
-      rate: item.price,
-      amount: item.quantity * item.price,
+      quantity: item.quantity || 1,
+      rate: item.price || item.rate || 0,
+      amount: (item.quantity || 1) * (item.price || item.rate || 0),
     }));
 
-    // Determine sale type and payment status
-    const saleType = paymentData ? 'online' : 'offline';
+    // Parse numeric values safely (accept many possible keys)
+    const parseAmount = v => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
+    const subtotal = parseAmount(orderData.subtotal ?? orderData.subtotal_amount ?? orderData.itemsSubtotal ?? 0);
+    const delivery_charges = parseAmount(orderData.delivery_charges ?? orderData.deliveryCharges ?? orderData.shipping_charges ?? 0);
+    const gift_price = parseAmount(orderData.gift_price ?? orderData.giftPrice ?? 0);
+    const discount_amount_raw = parseAmount(orderData.discount_amount ?? orderData.discount ?? 0); // server computed discount (coupon or manual)
+    const coupon_discount_raw = parseAmount(orderData.coupon_discount ?? orderData.couponDiscount ?? 0);
+    const provided_gst = parseAmount(orderData.gst_amount ?? orderData.tax ?? orderData.tax_amount ?? 0);
+    const provided_total = parseAmount(orderData.total_amount ?? orderData.total ?? orderData.totalAmount ?? 0);
+
+    // Decide which discount fields to use in invoice:
+    // - Offline: use discount_amount (manual/POS discount)
+    // - Online: prefer coupon_discount if provided, otherwise fall back to discount_amount
+    const discount_amount = isOfflineSale ? discount_amount_raw : 0; // offline's "discount" (shown as Discount)
+    const coupon_discount = isOnlineSale ? (coupon_discount_raw || discount_amount_raw) : 0; // online's coupon (shown as Coupon Discount)
+
+    // Compute GST for online if not provided. For offline, GST is included in subtotal (do not compute).
+    let gst_amount = provided_gst;
+    if (isOnlineSale) {
+      if (gst_amount === 0) {
+        // taxable base for GST is subtotal - coupon_discount + gift_price (coupon reduces taxable base)
+        const taxableBase = subtotal - coupon_discount + gift_price;
+        gst_amount = Math.round((taxableBase * 5) * 100) / 10000; // keep two decimals (equivalent to (taxableBase*5)/100)
+        gst_amount = (taxableBase * 5) / 100;
+      }
+    } else {
+      gst_amount = 0; // offline: GST included in subtotal
+    }
+
+    // Final total: prefer provided_total if frontend computed final amount; otherwise compute
+    let computedTotal;
+    if (isOfflineSale) {
+      computedTotal = subtotal - discount_amount;
+    } else {
+      computedTotal = subtotal + delivery_charges + gift_price + gst_amount - coupon_discount;
+    }
+    const finalTotal = provided_total || computedTotal;
+
+    // Payment status / invoice status
     const isOnlinePaid = paymentData && (paymentData.status === 'captured' || paymentData.status === 'authorized');
-    const paymentStatus = isOnlinePaid ? 'paid' : 'pending';
+    const paymentStatus = isOnlinePaid ? 'paid' : (orderData.payment_status || orderData.paymentStatus || 'pending');
     const invoiceStatus = isOnlinePaid ? 'paid' : 'issued';
 
-    // Get company settings for UPI QR code generation (for offline sales)
+    // UPI QR for offline invoices (optional)
     let upiQrCode = null;
     let upiId = null;
-    if (saleType === 'offline') {
+    if (isOfflineSale) {
       const companySettings = await CompanySettings.findOne().lean();
       upiId = companySettings?.upiId;
-      
-      // Generate UPI QR code if UPI ID exists
       if (upiId) {
-        const QRCode = require('qrcode');
-        const upiString = `upi://pay?pa=${upiId}&pn=${companySettings.companyName || 'Store'}&am=${orderData.total_amount}&cu=INR&tn=Invoice ${invoiceNumber}`;
         try {
+          const QRCode = require('qrcode');
+          const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(companySettings.companyName || 'Store')}&am=${finalTotal}&cu=INR&tn=Invoice ${invoiceNumber}`;
           upiQrCode = await QRCode.toDataURL(upiString);
-        } catch (qrError) {
-          console.error('Error generating QR code:', qrError);
+        } catch (err) {
+          console.error('QR generation failed:', err?.message || err);
         }
       }
     }
 
-    // Create invoice
-    const invoice = await Invoice.create({
+    // Build invoice document payload (fields aligned with PDF generator)
+    const invoicePayload = {
       invoiceNumber,
       orderId,
+      order_id: orderId ? orderId.toString() : null,
       userId: orderData.user_id || orderData.userId,
       items,
-      subtotal: orderData.subtotal || orderData.total_amount || 0,
-      tax: orderData.tax || 0,
-      discount: orderData.discount_amount || orderData.discount || 0,
-      coupon_discount: orderData.coupon_discount || 0,
-      gift_price: orderData.gift_price || 0,
-      shippingCharges: orderData.shipping_charges || orderData.shippingCharges || 0,
-      delivery_charges: orderData.delivery_charges || 0,
-      gst_amount: orderData.gst_amount || 0,
-      total: orderData.total_amount || orderData.total || 0,
+      subtotal,
+      tax: gst_amount, // legacy field - may be unused by PDF but keep populated
+      discount: discount_amount, // offline discount
+      discount_amount: discount_amount,
+      coupon_discount: coupon_discount,
+      gift_price,
+      shippingCharges: delivery_charges,
+      shipping_charges: delivery_charges,
+      delivery_charges: delivery_charges,
+      gst_amount,
+      total: finalTotal,
+      total_amount: finalTotal,
       issueDate,
       dueDate,
       paymentStatus,
-      paymentMethod: paymentData?.payment_method || orderData.payment_method || 'UPI',
-      paymentDate: isOnlinePaid ? new Date() : null,
-      razorpay_payment_id: paymentData?.razorpay_payment_id || null,
-      razorpay_order_id: paymentData?.razorpay_order_id || null,
+      paymentMethod: paymentData?.payment_method || orderData.payment_method || orderData.paymentMethod || 'UPI',
+      paymentDate: isOnlinePaid ? (orderData.paymentDate || new Date()) : (orderData.paymentDate || null),
+      razorpay_payment_id: paymentData?.razorpay_payment_id || orderData.razorpay_payment_id || null,
+      razorpay_order_id: paymentData?.razorpay_order_id || orderData.razorpay_order_id || null,
       sale_type: saleType,
       upi_qr_code: upiQrCode,
       upi_id: upiId,
-      billingAddress: orderData.billing_address || orderData.billingAddress,
-      shippingAddress: orderData.shipping_address || orderData.shippingAddress,
+      billingAddress: orderData.billing_address || orderData.billingAddress || orderData.billingAddressRaw || null,
+      shippingAddress: orderData.shipping_address || orderData.shippingAddress || orderData.shippingAddressRaw || null,
       notes: orderData.notes || 'Thank you for your order!',
-      terms: 'Payment due within 30 days. All sales are final.',
+      terms: orderData.terms || 'Payment due within 30 days. All sales are final.',
       status: invoiceStatus,
-    });
+    };
+
+    // Create invoice
+    const invoice = await Invoice.create(invoicePayload);
 
     return invoice;
   } catch (error) {
@@ -90,6 +143,7 @@ exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) 
     throw error;
   }
 };
+
 
 /**
  * Get all invoices (admin)
@@ -132,6 +186,7 @@ exports.getAllInvoices = async (req, res, next) => {
       id: inv._id.toString(),
       invoiceNumber: inv.invoiceNumber,
       orderId: inv.orderId?._id?.toString(),
+      order_id: inv.order_id || inv.orderId?._id?.toString(),
       orderNumber: inv.orderId?.order_number,
       userId: inv.userId?._id?.toString(),
       userName: inv.userId?.name,
@@ -249,6 +304,7 @@ exports.getInvoiceById = async (req, res, next) => {
       id: invoice._id.toString(),
       invoiceNumber: invoice.invoiceNumber,
       orderId: invoice.orderId?._id?.toString(),
+      order_id: invoice.order_id || invoice.orderId?._id?.toString(),
       orderNumber: invoice.orderId?.order_number,
       userId: invoice.userId._id.toString(),
       userName: invoice.userId.name,
@@ -319,6 +375,7 @@ exports.downloadInvoicePDF = async (req, res, next) => {
     const invoiceData = {
       invoiceNumber: invoice.invoiceNumber,
       orderId: invoice.orderId?._id?.toString(),
+      order_id: invoice.order_id || invoice.orderId?._id?.toString(),
       orderNumber: invoice.orderId?.order_number,
       userName: invoice.userId?.name,
       userEmail: invoice.userId?.email,
