@@ -1,12 +1,20 @@
 /**
 * Custom error handler middleware
 */
+const logger = require('../utils/logger');
+
 const errorHandler = (err, req, res, next) => {
   let error = { ...err };
   error.message = err.message;
  
   // Log to console for developer
-  console.error(err);
+  logger.error('errorHandler:unhandled_error', {
+    message: err.message,
+    stack: err.stack,
+    path: req.path,
+    method: req.method,
+    userId: req.user?._id,
+  });
  
   // Mongoose bad ObjectId
   if (err.name === 'CastError') {

@@ -6,6 +6,7 @@ const CartItem = require("../models/CartItem");
 const Coupon = require("../models/Coupon");
 const Payment = require("../models/Payment");
 const { computeDiscount, isUsable } = require("../utils/coupon");
+const logger = require("../utils/logger");
 const {
   sendOrderCreatedEmail,
   sendOrderCancelledEmail,
@@ -21,6 +22,12 @@ exports.getOrders = async (req, res, next) => {
     const userId = req.user._id;
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(parseInt(req.query.limit, 10) || 10, 100);
+
+    logger.info("orders:getOrders:start", {
+      userId,
+      page,
+      limit,
+    });
 
     const [orders, total] = await Promise.all([
       Order.find({ user_id: userId })
@@ -119,6 +126,14 @@ exports.getOrders = async (req, res, next) => {
       return out;
     });
 
+    logger.info("orders:getOrders:success", {
+      userId,
+      page,
+      limit,
+      count: formatted.length,
+      total,
+    });
+
     return res.status(200).json({
       success: true,
       count: formatted.length,
@@ -129,6 +144,11 @@ exports.getOrders = async (req, res, next) => {
       data: formatted,
     });
   } catch (error) {
+    logger.error("orders:getOrders:error", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+    });
     next(error);
   }
 };
@@ -142,11 +162,20 @@ exports.getOrderById = async (req, res, next) => {
     const userId = req.user._id;
     const orderId = req.params.id;
 
+    logger.info("orders:getOrderById:start", {
+      userId,
+      orderId,
+    });
+
     const order = await Order.findOne({ _id: orderId, user_id: userId })
       .populate("shipping_address_id")
       .lean();
 
     if (!order) {
+      logger.warn("orders:getOrderById:not_found", {
+        userId,
+        orderId,
+      });
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
@@ -218,13 +247,27 @@ exports.getOrderById = async (req, res, next) => {
     delete order.updatedAt;
     delete order.__v;
 
+    logger.info("orders:getOrderById:success", {
+      userId,
+      orderId,
+    });
+
     return res.status(200).json({ success: true, data: order });
   } catch (error) {
     if (error.kind === "ObjectId") {
+      logger.warn("orders:getOrderById:invalid_id", {
+        orderId: req.params.id,
+      });
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+    logger.error("orders:getOrderById:error", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      orderId: req.params.id,
+    });
     next(error);
   }
 };
@@ -238,12 +281,21 @@ exports.getOrderConfirmation = async (req, res, next) => {
     const userId = req.user._id;
     const orderId = req.params.id;
 
+    logger.info("orders:getOrderConfirmation:start", {
+      userId,
+      orderId,
+    });
+
     // Fetch order with all details
     const order = await Order.findOne({ _id: orderId, user_id: userId })
       .populate("shipping_address_id")
       .lean();
 
     if (!order) {
+      logger.warn("orders:getOrderConfirmation:not_found", {
+        userId,
+        orderId,
+      });
       return res.status(404).json({
         success: false,
         message: "Order not found",
@@ -351,17 +403,31 @@ exports.getOrderConfirmation = async (req, res, next) => {
       payment_method: order.payment_method || null,
     };
 
+    logger.info("orders:getOrderConfirmation:success", {
+      userId,
+      orderId,
+    });
+
     return res.status(200).json({
       success: true,
       data: confirmationData,
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
+      logger.warn("orders:getOrderConfirmation:invalid_id", {
+        orderId: req.params.id,
+      });
       return res.status(404).json({
         success: false,
         message: "Order not found",
       });
     }
+    logger.error("orders:getOrderConfirmation:error", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      orderId: req.params.id,
+    });
     next(error);
   }
 };
@@ -390,6 +456,13 @@ exports.createOrder = async (req, res, next) => {
       razorpay_order_id,
       payment_method,
     } = req.body;
+
+    logger.info("createOrder:start", {
+      userId,
+      total_amount,
+      itemsCount: items ? items.length : 0,
+      payment_method,
+    });
 
     // Basic validation
     if (!total_amount || !shipping_address_id || !items || items.length === 0) {
@@ -440,7 +513,7 @@ exports.createOrder = async (req, res, next) => {
     // Also treat explicit payment_method !== 'cod' as online if you want; keep razorpay primary.
     let sale_type = "online";
     sale_type = payment_method ? "offline" : "online";
-    console.log("sale type ========================", sale_type);
+    logger.debug("createOrder:sale_type", { sale_type });
 
     // Create order
     const order = await Order.create({
@@ -461,6 +534,13 @@ exports.createOrder = async (req, res, next) => {
       razorpay_order_id: razorpay_order_id || undefined,
     });
 
+    logger.info("createOrder:order_created", {
+      userId,
+      orderId: order._id.toString(),
+      sale_type,
+      total_amount: finalTotal,
+    });
+
     // Create order items
     const orderItemsData = items.map((i) => ({
       order_id: order._id,
@@ -479,7 +559,10 @@ exports.createOrder = async (req, res, next) => {
         { _id: couponUsed._id },
         { $inc: { usage_count: 1 } }
       ).catch((err) => {
-        console.error("Failed to increment coupon usage:", err?.message || err);
+        logger.error("createOrder:increment_coupon_usage_failed", {
+          message: err?.message || err,
+          couponId: couponUsed?._id?.toString(),
+        });
       });
     }
 
@@ -538,8 +621,15 @@ exports.createOrder = async (req, res, next) => {
     // Send order created email (best-effort)
     try {
       await sendOrderCreatedEmail(populatedOrder, req.user.email);
+      logger.info("createOrder:order_created_email_sent", {
+        userId,
+        orderId: populatedOrder.id,
+      });
     } catch (e) {
-      console.error("sendOrderCreatedEmail failed", { message: e?.message });
+      logger.error("createOrder:send_order_created_email_failed", {
+        message: e?.message,
+        orderId: populatedOrder.id,
+      });
     }
 
     // Create invoice (with paymentData if available)
@@ -609,12 +699,24 @@ exports.createOrder = async (req, res, next) => {
         notes: "Thank you for your order!",
       };
 
+      logger.info("createOrder:creating_invoice", {
+        orderId: order._id.toString(),
+        sale_type,
+        hasPaymentData: !!paymentData,
+      });
+
       // Create invoice using the unified payload; pass paymentData for online orders
       invoice = await createInvoiceFromOrder(
         order._id,
         invoiceData,
         paymentData
       );
+
+      logger.info("createOrder:invoice_created", {
+        orderId: order._id.toString(),
+        invoiceId: invoice._id.toString(),
+        invoiceNumber: invoice.invoiceNumber,
+      });
 
       // Save invoice references on order
       order.invoice_id = invoice._id;
@@ -625,9 +727,10 @@ exports.createOrder = async (req, res, next) => {
       populatedOrder.invoice_id = invoice._id.toString();
       populatedOrder.invoice_number = invoice.invoiceNumber;
     } catch (e) {
-      console.error("Invoice creation failed", {
+      logger.error("createOrder:invoice_creation_failed", {
         message: e?.message,
         stack: e?.stack,
+        orderId: order._id?.toString(),
       });
     }
 
@@ -636,13 +739,25 @@ exports.createOrder = async (req, res, next) => {
       data: populatedOrder,
       message: "Order created successfully",
     });
+    logger.info("createOrder:success", {
+      userId,
+      orderId: populatedOrder.id,
+      invoice_number: populatedOrder.invoice_number,
+    });
   } catch (error) {
     if (error.name === "ValidationError") {
+      logger.warn("createOrder:validation_error", {
+        message: error.message,
+      });
       const messages = Object.values(error.errors).map((err) => err.message);
       return res
         .status(400)
         .json({ success: false, message: messages.join(", ") });
     }
+    logger.error("createOrder:error", {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -655,6 +770,12 @@ exports.updateOrderStatus = async (req, res, next) => {
   try {
     const { status, shipmentDetails } = req.body;
     const orderId = req.params.id;
+
+    logger.info("orders:updateOrderStatus:start", {
+      orderId,
+      status,
+      isAdmin: req.user?.role === "admin",
+    });
 
     // Validate status
     const validStatuses = [
@@ -724,17 +845,30 @@ exports.updateOrderStatus = async (req, res, next) => {
     delete order.updatedAt;
     delete order.__v;
 
+    logger.info("orders:updateOrderStatus:success", {
+      orderId,
+      status: order.status,
+    });
+
     res.status(200).json({
       success: true,
       data: order,
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
+      logger.warn("orders:updateOrderStatus:invalid_id", {
+        orderId: req.params.id,
+      });
       return res.status(404).json({
         success: false,
         message: "Order not found",
       });
     }
+    logger.error("orders:updateOrderStatus:error", {
+      message: error.message,
+      stack: error.stack,
+      orderId: req.params.id,
+    });
     next(error);
   }
 };
@@ -745,6 +879,9 @@ exports.updateOrderStatus = async (req, res, next) => {
  */
 exports.getAllOrders = async (req, res, next) => {
   try {
+    logger.info("orders:getAllOrders:start", {
+      isAdmin: req.user?.role === "admin",
+    });
     // ✅ Use aggregation to fetch orders with order items in a single query
     const orders = await Order.aggregate([
       // Step 1: Sort orders by creation date
@@ -848,12 +985,20 @@ exports.getAllOrders = async (req, res, next) => {
       },
     ]);
 
+    logger.info("orders:getAllOrders:success", {
+      count: orders.length,
+    });
+
     res.status(200).json({
       success: true,
       count: orders.length,
       data: orders,
     });
   } catch (error) {
+    logger.error("orders:getAllOrders:error", {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -867,6 +1012,11 @@ exports.cancelOrder = async (req, res, next) => {
     const orderId = req.params.id;
     const reasonRaw = req.body?.reason;
     const reason = typeof reasonRaw === "string" ? reasonRaw.trim() : "";
+
+    logger.info("orders:cancelOrder:start", {
+      userId,
+      orderId,
+    });
 
     const order = await Order.findOne({ _id: orderId, user_id: userId });
     if (!order) {
@@ -950,7 +1100,10 @@ exports.cancelOrder = async (req, res, next) => {
         reason || "No reason provided"
       );
     } catch (e) {
-      logger.error("sendOrderCancelledEmail failed", { message: e?.message });
+      logger.error("orders:cancelOrder:send_cancelled_email_failed", {
+        message: e?.message,
+        orderId: order._id.toString(),
+      });
     }
 
     // Response to client (saved order)
@@ -963,6 +1116,12 @@ exports.cancelOrder = async (req, res, next) => {
     delete formattedOrder.createdAt;
     delete formattedOrder.updatedAt;
 
+    logger.info("orders:cancelOrder:success", {
+      userId,
+      orderId: formattedOrder.id,
+      status: formattedOrder.status,
+    });
+
     return res.status(200).json({
       success: true,
       data: formattedOrder,
@@ -970,10 +1129,19 @@ exports.cancelOrder = async (req, res, next) => {
     });
   } catch (error) {
     if (error.kind === "ObjectId") {
+      logger.warn("orders:cancelOrder:invalid_id", {
+        orderId: req.params.id,
+      });
       return res
         .status(404)
         .json({ success: false, message: "Order not found" });
     }
+    logger.error("orders:cancelOrder:error", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?._id,
+      orderId: req.params.id,
+    });
     next(error);
   }
 };

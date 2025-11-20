@@ -3,6 +3,7 @@ const Order = require('../models/Order');
 const User = require('../models/User');
 const CompanySettings = require('../models/CompanySettings');
 const { generateInvoicePDF } = require('../utils/pdfGenerator');
+const logger = require('../utils/logger');
 
 /**
  * Create invoice from order
@@ -12,6 +13,12 @@ exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) 
   try {
     // Generate invoice number
     const invoiceNumber = await Invoice.generateInvoiceNumber();
+
+    logger.info('invoice:create_from_order:start', {
+      orderId: orderId ? orderId.toString() : null,
+      userId: orderData?.user_id || orderData?.userId || null,
+      hasPaymentData: !!paymentData,
+    });
 
     // Dates
     const issueDate = new Date();
@@ -93,7 +100,11 @@ exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) 
           const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(companySettings.companyName || 'Store')}&am=${finalTotal}&cu=INR&tn=Invoice ${invoiceNumber}`;
           upiQrCode = await QRCode.toDataURL(upiString);
         } catch (err) {
-          console.error('QR generation failed:', err?.message || err);
+          logger.error('invoice:create_from_order:qr_generation_failed', {
+            message: err?.message,
+            orderId: orderId ? orderId.toString() : null,
+            invoiceNumber,
+          });
         }
       }
     }
@@ -137,9 +148,20 @@ exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) 
     // Create invoice
     const invoice = await Invoice.create(invoicePayload);
 
+    logger.info('invoice:create_from_order:success', {
+      orderId: orderId ? orderId.toString() : null,
+      invoiceId: invoice._id.toString(),
+      invoiceNumber,
+      sale_type: saleType,
+    });
+
     return invoice;
   } catch (error) {
-    console.error('Error creating invoice from order:', error);
+    logger.error('invoice:create_from_order:error', {
+      message: error?.message,
+      stack: error?.stack,
+      orderId: orderId ? orderId.toString() : null,
+    });
     throw error;
   }
 };
@@ -170,6 +192,14 @@ exports.getAllInvoices = async (req, res, next) => {
     if (req.query.search) {
       query.invoiceNumber = { $regex: req.query.search, $options: 'i' };
     }
+
+    logger.info('invoice:getAllInvoices:start', {
+      page,
+      limit,
+      hasStatus: Boolean(req.query.status),
+      hasPaymentStatus: Boolean(req.query.paymentStatus),
+      hasSearch: Boolean(req.query.search),
+    });
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
@@ -203,6 +233,13 @@ exports.getAllInvoices = async (req, res, next) => {
       updatedAt: inv.updatedAt,
     }));
 
+    logger.info('invoice:getAllInvoices:success', {
+      page,
+      limit,
+      count: formattedInvoices.length,
+      total,
+    });
+
     res.json({
       success: true,
       data: formattedInvoices,
@@ -214,6 +251,10 @@ exports.getAllInvoices = async (req, res, next) => {
       },
     });
   } catch (error) {
+    logger.error('invoice:getAllInvoices:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -229,6 +270,12 @@ exports.getUserInvoices = async (req, res, next) => {
     const skip = (page - 1) * limit;
 
     const query = { userId };
+
+    logger.info('invoice:getUserInvoices:start', {
+      userId,
+      page,
+      limit,
+    });
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
@@ -280,12 +327,21 @@ exports.getInvoiceById = async (req, res, next) => {
     const userId = req.user._id;
     const userRole = req.user.role;
 
+    logger.info('invoice:getInvoiceById:start', {
+      invoiceId,
+      userId,
+      userRole,
+    });
+
     const invoice = await Invoice.findById(invoiceId)
       .populate('userId', 'name email phone')
       .populate('orderId', 'order_number')
       .lean();
 
     if (!invoice) {
+      logger.warn('invoice:getInvoiceById:not_found', {
+        invoiceId,
+      });
       return res.status(404).json({
         success: false,
         message: 'Invoice not found',
@@ -294,6 +350,11 @@ exports.getInvoiceById = async (req, res, next) => {
 
     // Check permissions (user can only see their own invoices, admin can see all)
     if (userRole !== 'admin' && invoice.userId._id.toString() !== userId.toString()) {
+      logger.warn('invoice:getInvoiceById:forbidden', {
+        invoiceId,
+        userId,
+        userRole,
+      });
       return res.status(403).json({
         success: false,
         message: 'Access denied',
@@ -330,11 +391,22 @@ exports.getInvoiceById = async (req, res, next) => {
       updatedAt: invoice.updatedAt,
     };
 
+    logger.info('invoice:getInvoiceById:success', {
+      invoiceId,
+      userId,
+    });
+
     res.json({
       success: true,
       data: formattedInvoice,
     });
   } catch (error) {
+    logger.error('invoice:getInvoiceById:error', {
+      message: error.message,
+      stack: error.stack,
+      invoiceId: req.params.id,
+      userId: req.user?._id,
+    });
     next(error);
   }
 };
@@ -348,12 +420,21 @@ exports.downloadInvoicePDF = async (req, res, next) => {
     const userId = req.user._id;
     const userRole = req.user.role;
 
+    logger.info('invoice:downloadPDF:start', {
+      invoiceId,
+      userId,
+      userRole,
+    });
+
     const invoice = await Invoice.findById(invoiceId)
       .populate('userId', 'name email phone')
       .populate('orderId')
       .lean();
 
     if (!invoice) {
+      logger.warn('invoice:downloadPDF:not_found', {
+        invoiceId,
+      });
       return res.status(404).json({
         success: false,
         message: 'Invoice not found',
@@ -443,8 +524,18 @@ exports.downloadInvoicePDF = async (req, res, next) => {
 
     // Send PDF
     res.send(pdfBuffer);
+
+    logger.info('invoice:downloadPDF:success', {
+      invoiceId,
+      userId,
+    });
   } catch (error) {
-    console.error('Error generating invoice PDF:', error);
+    logger.error('invoice:downloadPDF:error', {
+      message: error.message,
+      stack: error.stack,
+      invoiceId: req.params.id,
+      userId: req.user?._id,
+    });
     next(error);
   }
 };
@@ -457,9 +548,18 @@ exports.updateInvoiceStatus = async (req, res, next) => {
     const invoiceId = req.params.id;
     const { status, paymentStatus } = req.body;
 
+    logger.info('invoice:updateStatus:start', {
+      invoiceId,
+      status,
+      paymentStatus,
+    });
+
     const invoice = await Invoice.findById(invoiceId);
 
     if (!invoice) {
+      logger.warn('invoice:updateStatus:not_found', {
+        invoiceId,
+      });
       return res.status(404).json({
         success: false,
         message: 'Invoice not found',
@@ -478,6 +578,12 @@ exports.updateInvoiceStatus = async (req, res, next) => {
     }
 
     await invoice.save();
+
+    logger.info('invoice:updateStatus:success', {
+      invoiceId,
+      status: invoice.status,
+      paymentStatus: invoice.paymentStatus,
+    });
 
     res.json({
       success: true,
@@ -501,20 +607,36 @@ exports.deleteInvoice = async (req, res, next) => {
   try {
     const invoiceId = req.params.id;
 
+    logger.info('invoice:delete:start', {
+      invoiceId,
+    });
+
     const invoice = await Invoice.findByIdAndDelete(invoiceId);
 
     if (!invoice) {
+      logger.warn('invoice:delete:not_found', {
+        invoiceId,
+      });
       return res.status(404).json({
         success: false,
         message: 'Invoice not found',
       });
     }
 
+    logger.info('invoice:delete:success', {
+      invoiceId,
+    });
+
     res.json({
       success: true,
       message: 'Invoice deleted successfully',
     });
   } catch (error) {
+    logger.error('invoice:delete:error', {
+      message: error.message,
+      stack: error.stack,
+      invoiceId: req.params.id,
+    });
     next(error);
   }
 };
@@ -524,13 +646,23 @@ exports.deleteInvoice = async (req, res, next) => {
  */
 exports.getNextInvoiceNumber = async (req, res, next) => {
   try {
+    logger.info('invoice:getNextNumber:start');
+
     const nextNumber = await Invoice.generateInvoiceNumber();
+
+    logger.info('invoice:getNextNumber:success', {
+      nextNumber,
+    });
 
     res.json({
       success: true,
       nextNumber,
     });
   } catch (error) {
+    logger.error('invoice:getNextNumber:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -615,6 +747,10 @@ exports.markOfflineInvoicePaid = async (req, res, next) => {
     const invoiceId = req.params.id;
     const { paymentMethod, paymentNotes } = req.body;
 
+    logger.info('invoice:markOfflinePaid:start', {
+      invoiceId,
+    });
+
     const invoice = await Invoice.findById(invoiceId);
 
     if (!invoice) {
@@ -643,6 +779,12 @@ exports.markOfflineInvoicePaid = async (req, res, next) => {
     }
 
     await invoice.save();
+
+    logger.info('invoice:markOfflinePaid:success', {
+      invoiceId,
+      paymentStatus: invoice.paymentStatus,
+      status: invoice.status,
+    });
 
     res.json({
       success: true,

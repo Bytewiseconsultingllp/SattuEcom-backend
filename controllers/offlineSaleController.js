@@ -4,6 +4,7 @@ const Order = require('../models/Order');
 const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../utils/emailService');
 const { createInvoiceFromOrder } = require('./invoiceController');
+const logger = require('../utils/logger');
 
 // Generate random password
 const generatePassword = () => crypto.randomBytes(8).toString('hex');
@@ -46,6 +47,18 @@ exports.getOfflineSales = async (req, res, next) => {
       ];
     }
 
+    logger.info('offlineSales:list:start', {
+      page,
+      limit,
+      filters: {
+        startDate,
+        endDate,
+        paymentMethod,
+        gstType,
+        hasSearch: Boolean(q),
+      },
+    });
+
     const [sales, total] = await Promise.all([
       OfflineSale.find(query)
         .sort({ date: -1 })
@@ -54,6 +67,13 @@ exports.getOfflineSales = async (req, res, next) => {
         .lean(),
       OfflineSale.countDocuments(query),
     ]);
+
+    logger.info('offlineSales:list:success', {
+      page,
+      limit,
+      count: sales.length,
+      total,
+    });
 
     res.status(200).json({
       success: true,
@@ -65,6 +85,10 @@ exports.getOfflineSales = async (req, res, next) => {
       data: sales,
     });
   } catch (error) {
+    logger.error('offlineSales:list:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -116,8 +140,17 @@ exports.sendCredentialForSale = async (req, res, next) => {
 
     await sendPasswordResetEmail(sale.customerEmail, sale.customerName || '');
 
+    logger.info('offlineSales:send_credential_for_sale:success', {
+      saleId: sale._id.toString(),
+    });
+
     return res.status(200).json({ success: true, message: 'Password reset email sent' });
   } catch (error) {
+    logger.error('offlineSales:send_credential_for_sale:error', {
+      message: error.message,
+      stack: error.stack,
+      saleId: req.params.id,
+    });
     next(error);
   }
 };
@@ -177,6 +210,11 @@ exports.getOfflineSaleById = async (req, res, next) => {
         success: false,
         message: 'Offline sale not found',
       });
+
+      logger.info('offlineSales:create:user_created', {
+        userId: user._id.toString(),
+        email: user.email,
+      });
     }
 
     res.status(200).json({
@@ -211,6 +249,13 @@ exports.createOfflineSale = async (req, res, next) => {
     const parsedTotalAmount = Number(totalAmount) || 0;
     const parsedFinalAmount = finalAmount !== undefined ? Number(finalAmount) : parsedTotalAmount;
 
+    logger.info('offlineSales:create:start', {
+      gstType,
+      totalAmount: parsedTotalAmount,
+      finalAmount: parsedFinalAmount,
+      itemsCount: items.length,
+    });
+
     const sale = await OfflineSale.create({
       date: date ? new Date(date) : new Date(),
       customerName,
@@ -223,6 +268,10 @@ exports.createOfflineSale = async (req, res, next) => {
       gstType: gstType || 'non-gst',
       paymentMethod: paymentMethod || 'cash',
       notes: notes || '',
+    });
+
+    logger.info('offlineSales:create:sale_created', {
+      saleId: sale._id.toString(),
     });
 
     // Create or get customer
@@ -247,8 +296,14 @@ exports.createOfflineSale = async (req, res, next) => {
       if (!suppressEmail) {
         try {
           await sendPasswordResetEmail(customerEmail, customerName);
+          logger.info('offlineSales:create:welcome_email_sent', {
+            userId: user._id.toString(),
+          });
         } catch (e) {
           // do not block sale creation on email errors during normal flow
+          logger.error('offlineSales:create:welcome_email_failed', {
+            message: e?.message,
+          });
         }
       }
     }
@@ -259,9 +314,20 @@ exports.createOfflineSale = async (req, res, next) => {
       status: 'delivered',
     });
 
+    logger.info('offlineSales:create:order_created', {
+      orderId: order._id.toString(),
+      userId: user._id.toString(),
+      saleId: sale._id.toString(),
+    });
+
     let invoice = null;
     if ((sale.gstType || '').toLowerCase() === 'gst') {
       try {
+        logger.info('offlineSales:create:creating_invoice', {
+          saleId: sale._id.toString(),
+          orderId: order._id.toString(),
+          gstType: sale.gstType,
+        });
         const invoicePayload = {
           user_id: user._id,
           items: (sale.items || []).map((item) => ({
@@ -296,6 +362,13 @@ exports.createOfflineSale = async (req, res, next) => {
 
         invoice = await createInvoiceFromOrder(order._id, invoicePayload, null);
 
+        logger.info('offlineSales:create:invoice_created', {
+          saleId: sale._id.toString(),
+          orderId: order._id.toString(),
+          invoiceId: invoice._id.toString(),
+          invoiceNumber: invoice.invoiceNumber,
+        });
+
         order.invoice_id = invoice._id;
         order.invoice_number = invoice.invoiceNumber;
         await order.save();
@@ -303,9 +376,11 @@ exports.createOfflineSale = async (req, res, next) => {
         sale.invoiceNumber = invoice.invoiceNumber;
         await sale.save();
       } catch (invoiceError) {
-        console.error('Failed to create invoice for offline sale', {
+        logger.error('offlineSales:create:invoice_creation_failed', {
           message: invoiceError?.message,
           stack: invoiceError?.stack,
+          saleId: sale._id.toString(),
+          orderId: order._id.toString(),
         });
       }
     }
@@ -328,6 +403,12 @@ exports.createOfflineSale = async (req, res, next) => {
         ? 'Offline sale created, customer created, and welcome email sent'
         : 'Offline sale and order created successfully',
     });
+    logger.info('offlineSales:create:success', {
+      saleId: sale._id.toString(),
+      orderId: order._id.toString(),
+      invoiceNumber: sale.invoiceNumber || null,
+      isNewCustomer,
+    });
   } catch (error) {
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map((err) => err.message);
@@ -336,6 +417,10 @@ exports.createOfflineSale = async (req, res, next) => {
         message: messages.join(', '),
       });
     }
+    logger.error('offlineSales:create:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
