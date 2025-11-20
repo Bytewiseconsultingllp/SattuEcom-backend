@@ -576,7 +576,7 @@ exports.getOfflineSalesStats = async (req, res, next) => {
  */
 exports.exportOfflineSales = async (req, res, next) => {
   try {
-    const { period } = req.query; // weekly, monthly, quarterly, annually
+    const { period, gstType } = req.query; // weekly, monthly, quarterly, annually, optional gst/non-gst filter
     
     let startDate = new Date();
     const endDate = new Date();
@@ -598,9 +598,15 @@ exports.exportOfflineSales = async (req, res, next) => {
         startDate.setDate(endDate.getDate() - 7); // Default to weekly
     }
 
-    const sales = await OfflineSale.find({
+    const findQuery = {
       date: { $gte: startDate, $lte: endDate },
-    }).sort({ date: -1 });
+    };
+
+    if (gstType) {
+      findQuery.gstType = gstType;
+    }
+
+    const sales = await OfflineSale.find(findQuery).sort({ date: -1 });
 
     // Generate CSV
     const headers = [
