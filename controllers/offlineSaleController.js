@@ -299,6 +299,9 @@ exports.createOfflineSale = async (req, res, next) => {
         order.invoice_id = invoice._id;
         order.invoice_number = invoice.invoiceNumber;
         await order.save();
+
+        sale.invoiceNumber = invoice.invoiceNumber;
+        await sale.save();
       } catch (invoiceError) {
         console.error('Failed to create invoice for offline sale', {
           message: invoiceError?.message,

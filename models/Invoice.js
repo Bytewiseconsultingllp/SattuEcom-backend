@@ -170,7 +170,6 @@ invoiceSchema.index({ status: 1 });
 // Static method to generate next invoice number
 invoiceSchema.statics.generateInvoiceNumber = async function () {
   try {
-    // Find the latest invoice
     const latestInvoice = await this.findOne({}, { invoiceNumber: 1 })
       .sort({ createdAt: -1 })
       .lean();
@@ -178,19 +177,21 @@ invoiceSchema.statics.generateInvoiceNumber = async function () {
     let nextNumber = 1;
 
     if (latestInvoice && latestInvoice.invoiceNumber) {
-      // Extract number from invoice number (e.g., "INV-GF-00001" -> 1)
-      const match = latestInvoice.invoiceNumber.match(/INV-GF-(\d+)/);
-      if (match) {
-        nextNumber = parseInt(match[1]) + 1;
+      // Extract the last numeric chunk from whatever the current invoiceNumber is
+      const str = String(latestInvoice.invoiceNumber);
+      const digitMatches = str.match(/(\d+)/g);
+      if (digitMatches && digitMatches.length > 0) {
+        const lastDigits = digitMatches[digitMatches.length - 1];
+        const parsed = parseInt(lastDigits, 10);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          nextNumber = parsed + 1;
+        }
       }
     }
 
-    // Format with leading zeros (5 digits)
-    const formattedNumber = nextNumber.toString().padStart(5, '0');
-    return `INV-GF-${formattedNumber}`;
+    return `INV-GF-${nextNumber}`;
   } catch (error) {
     console.error('Error generating invoice number:', error);
-    // Fallback to timestamp-based number
     return `INV-GF-${Date.now()}`;
   }
 };
