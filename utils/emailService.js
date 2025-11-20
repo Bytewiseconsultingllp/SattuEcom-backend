@@ -226,13 +226,6 @@ async function sendWelcomeEmail(email, name, tempPassword) {
   return sendMailSafe({ to: email, subject, html });
 }
 
-// Optional: simple test helper to verify SMTP to any target inbox
-async function sendTestEmail(to, subject = 'SMTP Test', text = 'This is a test email from SattuEcom') {
-  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
-  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
-  return transporter.sendMail({ from, to, subject, text });
-}
-
 async function sendPasswordResetEmail(email, name) {
   const subject = 'Set Your Password - Grain Fusion';
   const resetUrl = `${process.env.FRONTEND_URL || ''}/forgot-password`;
@@ -253,4 +246,85 @@ async function sendPasswordResetEmail(email, name) {
   return sendMailSafe({ to: email, subject, html });
 }
 
-module.exports = { sendOTPEmail, sendOrderCreatedEmail, sendOrderCancelledEmail, sendWelcomeEmail, sendPasswordResetEmail, sendTestEmail };
+// Optional: simple test helper to verify SMTP to any target inbox
+async function sendTestEmail(to, subject = 'SMTP Test', text = 'This is a test email from SattuEcom') {
+  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
+  const from = `"${fromName}" <${process.env.SMTP_USER}>`;
+  return transporter.sendMail({ from, to, subject, text });
+}
+
+// Contact management emails
+async function sendContactQueryCreatedEmails(queryDoc) {
+  const admin = process.env.ADMIN_EMAIL;
+
+  const userHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #333;">Hi ${queryDoc.name},</h2>
+      <p>Thank you for contacting us. We have received your enquiry and will get back to you shortly.</p>
+      <p><strong>Subject:</strong> ${queryDoc.subject}</p>
+      <p><strong>Your Message:</strong></p>
+      <div style="background-color:#f9f9f9;padding:12px;border-radius:4px;border:1px solid #eee;white-space:pre-line;">${queryDoc.message}</div>
+      <p style="margin-top:16px;color:#777;font-size:12px;">This is an automated acknowledgement. Our team will review your enquiry.</p>
+    </div>
+  `;
+
+  const adminHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color:#333;margin-bottom:8px;">New Contact Enquiry Received</h2>
+      <p><strong>Name:</strong> ${queryDoc.name}</p>
+      <p><strong>Email:</strong> ${queryDoc.email}</p>
+      <p><strong>Phone:</strong> ${queryDoc.phone}</p>
+      <p><strong>Subject:</strong> ${queryDoc.subject}</p>
+      <p><strong>Message:</strong></p>
+      <div style="background-color:#f9f9f9;padding:12px;border-radius:4px;border:1px solid #eee;white-space:pre-line;">${queryDoc.message}</div>
+      <p style="margin-top:12px;color:#777;font-size:12px;">Contact Query ID: ${queryDoc.id || queryDoc._id}</p>
+    </div>
+  `;
+
+  await Promise.all([
+    sendMailSafe({
+      to: queryDoc.email,
+      subject: 'We have received your enquiry',
+      html: userHtml,
+    }),
+    admin
+      ? sendMailSafe({
+          to: admin,
+          subject: `New contact enquiry: ${queryDoc.subject}`,
+          html: adminHtml,
+        })
+      : Promise.resolve(),
+  ]);
+}
+
+async function sendContactQueryResponseEmail(queryDoc) {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color:#333;">Response to Your Enquiry</h2>
+      <p>Hi <strong>${queryDoc.name}</strong>,</p>
+      <p>We have responded to your enquiry with the subject <strong>${queryDoc.subject}</strong>.</p>
+      <p><strong>Your Original Message:</strong></p>
+      <div style="background-color:#f9f9f9;padding:12px;border-radius:4px;border:1px solid #eee;white-space:pre-line;">${queryDoc.message}</div>
+      <p style="margin-top:16px;"><strong>Our Response:</strong></p>
+      <div style="background-color:#e8f5e9;padding:12px;border-radius:4px;border:1px solid #c8e6c9;white-space:pre-line;">${queryDoc.response || ''}</div>
+      <p style="margin-top:16px;color:#777;font-size:12px;">If you have any further questions, you can reply to this email.</p>
+    </div>
+  `;
+
+  await sendMailSafe({
+    to: queryDoc.email,
+    subject: `Response to your enquiry - ${queryDoc.subject}`,
+    html,
+  });
+}
+
+module.exports = {
+  sendOTPEmail,
+  sendOrderCreatedEmail,
+  sendOrderCancelledEmail,
+  sendWelcomeEmail,
+  sendPasswordResetEmail,
+  sendTestEmail,
+  sendContactQueryCreatedEmails,
+  sendContactQueryResponseEmail,
+};

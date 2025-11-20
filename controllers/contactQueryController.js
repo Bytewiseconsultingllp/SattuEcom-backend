@@ -1,4 +1,9 @@
 const ContactQuery = require('../models/ContactQuery');
+const {
+  sendContactQueryCreatedEmails,
+  sendContactQueryResponseEmail,
+} = require('../utils/emailService');
+const logger = require('../utils/logger');
 
 /**
  * Get all contact queries
@@ -25,7 +30,17 @@ exports.getContactQueries = async (req, res, next) => {
       ];
     }
 
+    logger.info('contact:getContactQueries:start', {
+      status: status || null,
+      priority: priority || null,
+      hasSearch: Boolean(searchQuery),
+    });
+
     const queries = await ContactQuery.find(query).sort({ createdAt: -1 });
+
+    logger.info('contact:getContactQueries:success', {
+      count: queries.length,
+    });
 
     res.status(200).json({
       success: true,
@@ -33,6 +48,10 @@ exports.getContactQueries = async (req, res, next) => {
       data: queries,
     });
   } catch (error) {
+    logger.error('contact:getContactQueries:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -42,9 +61,13 @@ exports.getContactQueries = async (req, res, next) => {
  */
 exports.getContactQueryById = async (req, res, next) => {
   try {
+    const id = req.params.id;
+    logger.info('contact:getContactQueryById:start', { id });
+
     const query = await ContactQuery.findById(req.params.id).populate('respondedBy', 'name email');
 
     if (!query) {
+      logger.warn('contact:getContactQueryById:not_found', { id });
       return res.status(404).json({
         success: false,
         message: 'Contact query not found',
@@ -57,11 +80,17 @@ exports.getContactQueryById = async (req, res, next) => {
     });
   } catch (error) {
     if (error.kind === 'ObjectId') {
+      logger.warn('contact:getContactQueryById:invalid_id', { id: req.params.id });
       return res.status(404).json({
         success: false,
         message: 'Contact query not found',
       });
     }
+    logger.error('contact:getContactQueryById:error', {
+      message: error.message,
+      stack: error.stack,
+      id: req.params.id,
+    });
     next(error);
   }
 };
@@ -80,6 +109,13 @@ exports.createContactQuery = async (req, res, next) => {
       });
     }
 
+    logger.info('contact:createContactQuery:start', {
+      hasName: Boolean(name),
+      hasEmail: Boolean(email),
+      hasPhone: Boolean(phone),
+      subject,
+    });
+
     const query = await ContactQuery.create({
       name,
       email,
@@ -88,6 +124,18 @@ exports.createContactQuery = async (req, res, next) => {
       message,
       status: 'new',
       priority: 'medium',
+    });
+
+    try {
+      await sendContactQueryCreatedEmails(query);
+    } catch (e) {
+      // Email failures should not block contact creation; they are logged within emailService
+    }
+
+    logger.info('contact:createContactQuery:success', {
+      id: query.id || query._id,
+      status: query.status,
+      priority: query.priority,
     });
 
     res.status(201).json({
@@ -103,6 +151,10 @@ exports.createContactQuery = async (req, res, next) => {
         message: messages.join(', '),
       });
     }
+    logger.error('contact:createContactQuery:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
@@ -114,6 +166,13 @@ exports.updateContactQuery = async (req, res, next) => {
   try {
     const { status, priority, response } = req.body;
     const userId = req.user?._id;
+
+    logger.info('contact:updateContactQuery:start', {
+      id: req.params.id,
+      status: status || null,
+      priority: priority || null,
+      hasResponse: Boolean(response),
+    });
 
     const updateData = {};
     if (status) updateData.status = status;
@@ -136,6 +195,21 @@ exports.updateContactQuery = async (req, res, next) => {
       });
     }
 
+    if (response) {
+      try {
+        await sendContactQueryResponseEmail(query);
+      } catch (e) {
+        // Email failures should not block contact update; they are logged within emailService
+      }
+    }
+
+    logger.info('contact:updateContactQuery:success', {
+      id: query.id || query._id,
+      status: query.status,
+      priority: query.priority,
+      hasResponse: Boolean(query.response),
+    });
+
     res.status(200).json({
       success: true,
       data: query,
@@ -150,11 +224,17 @@ exports.updateContactQuery = async (req, res, next) => {
       });
     }
     if (error.kind === 'ObjectId') {
+      logger.warn('contact:updateContactQuery:invalid_id', { id: req.params.id });
       return res.status(404).json({
         success: false,
         message: 'Contact query not found',
       });
     }
+    logger.error('contact:updateContactQuery:error', {
+      message: error.message,
+      stack: error.stack,
+      id: req.params.id,
+    });
     next(error);
   }
 };
@@ -164,7 +244,11 @@ exports.updateContactQuery = async (req, res, next) => {
  */
 exports.deleteContactQuery = async (req, res, next) => {
   try {
-    const query = await ContactQuery.findByIdAndDelete(req.params.id);
+    const id = req.params.id;
+
+    logger.info('contact:deleteContactQuery:start', { id });
+
+    const query = await ContactQuery.findByIdAndDelete(id);
 
     if (!query) {
       return res.status(404).json({
@@ -172,6 +256,8 @@ exports.deleteContactQuery = async (req, res, next) => {
         message: 'Contact query not found',
       });
     }
+
+    logger.info('contact:deleteContactQuery:success', { id });
 
     res.status(200).json({
       success: true,
@@ -194,6 +280,8 @@ exports.deleteContactQuery = async (req, res, next) => {
  */
 exports.getContactQueryStats = async (req, res, next) => {
   try {
+    logger.info('contact:getContactQueryStats:start');
+
     const queries = await ContactQuery.find();
 
     const stats = {
@@ -205,11 +293,17 @@ exports.getContactQueryStats = async (req, res, next) => {
       highPriority: queries.filter((q) => q.priority === 'high').length,
     };
 
+    logger.info('contact:getContactQueryStats:success', stats);
+
     res.status(200).json({
       success: true,
       data: stats,
     });
   } catch (error) {
+    logger.error('contact:getContactQueryStats:error', {
+      message: error.message,
+      stack: error.stack,
+    });
     next(error);
   }
 };
