@@ -30,11 +30,6 @@ const productSchema = new mongoose.Schema(
       required: true,
       validate: { validator: v => v && v.length > 0 }
     },
-    stock: {
-      type: Number,
-      default: 0,
-      min: [0, 'Stock cannot be negative'],
-    },
     in_stock: {
       type: Boolean,
       default: true,
@@ -94,17 +89,12 @@ const productSchema = new mongoose.Schema(
   }
 );
  
-// Pre-save hook to auto-calculate in_stock based on stock
-productSchema.pre('save', function(next) {
-  this.in_stock = this.stock > 0;
-  next();
-});
+// in_stock is manually managed by admin
 
 // Index for faster queries
 productSchema.index({ category: 1 });
 productSchema.index({ price: 1 });
 productSchema.index({ in_stock: 1 });
-productSchema.index({ stock: 1 });
 productSchema.index({ createdAt: -1 });
 productSchema.index({ rating: -1 });
 productSchema.index({ reviews_count: -1 });
