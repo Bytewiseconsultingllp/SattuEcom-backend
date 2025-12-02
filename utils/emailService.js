@@ -201,6 +201,67 @@ async function sendOrderCancelledEmail(order, userEmail, reason) {
   ]);
 }
 
+// New: order shipped notification
+async function sendOrderShippedEmail(order, userEmail, shipmentDetails) {
+  const trackingInfo = shipmentDetails ? `
+    <div style="background-color: #e7f5ff; padding: 15px; border-left: 4px solid #1971c2; margin: 20px 0;">
+      <h3 style="margin: 0 0 10px; color: #1971c2;">Shipment Tracking Information</h3>
+      <p style="margin: 5px 0;"><strong>Delivery Partner:</strong> ${shipmentDetails.deliveryPartner || 'N/A'}</p>
+      <p style="margin: 5px 0;"><strong>Tracking Number:</strong> ${shipmentDetails.trackingNumber || 'N/A'}</p>
+      ${shipmentDetails.estimatedDelivery ? `<p style="margin: 5px 0;"><strong>Estimated Delivery:</strong> ${shipmentDetails.estimatedDelivery}</p>` : ''}
+      <p style="margin: 10px 0 0; font-size: 12px; color: #666;">You can use the tracking number above to track your shipment with the delivery partner.</p>
+    </div>
+  ` : '';
+  
+  const html = renderOrderHtml(order, `
+    <h2 style="margin:0 0 8px;color:#1971c2;">Your Order Has Been Shipped! 🚚</h2>
+    <p style="color: #666;">Great news! Your order is on its way to you.</p>
+    ${trackingInfo}
+  `);
+  
+  const admin = process.env.ADMIN_EMAIL;
+  await Promise.all([
+    sendMailSafe({ to: userEmail, subject: `Order Shipped - ${order.id}`, html }),
+    admin ? sendMailSafe({ to: admin, subject: `Order Shipped - ${order.id}`, html }) : Promise.resolve(),
+  ]);
+}
+
+// New: order delivered notification
+async function sendOrderDeliveredEmail(order, userEmail) {
+  const html = renderOrderHtml(order, `
+    <h2 style="margin:0 0 8px;color:#16a34a;">Your Order Has Been Delivered! ✅</h2>
+    <p style="color: #666;">We hope you enjoy your purchase! Thank you for shopping with us.</p>
+    <div style="background-color: #f0fdf4; padding: 15px; border-left: 4px solid #16a34a; margin: 20px 0;">
+      <p style="margin: 5px 0; color: #15803d;">If you have any issues with your order, please don't hesitate to contact our support team.</p>
+      <p style="margin: 10px 0 0; font-size: 12px; color: #666;">We'd love to hear your feedback about your purchase!</p>
+    </div>
+  `);
+  
+  const admin = process.env.ADMIN_EMAIL;
+  await Promise.all([
+    sendMailSafe({ to: userEmail, subject: `Order Delivered - ${order.id}`, html }),
+    admin ? sendMailSafe({ to: admin, subject: `Order Delivered - ${order.id}`, html }) : Promise.resolve(),
+  ]);
+}
+
+// New: order processing notification
+async function sendOrderProcessingEmail(order, userEmail) {
+  const html = renderOrderHtml(order, `
+    <h2 style="margin:0 0 8px;color:#ea580c;">Your Order Is Being Processed! 📦</h2>
+    <p style="color: #666;">Good news! We've started preparing your order for shipment.</p>
+    <div style="background-color: #fff7ed; padding: 15px; border-left: 4px solid #ea580c; margin: 20px 0;">
+      <p style="margin: 5px 0; color: #c2410c;">Your order is being carefully packed and will be shipped soon.</p>
+      <p style="margin: 10px 0 0; font-size: 12px; color: #666;">We'll send you another email with tracking information once your order is shipped.</p>
+    </div>
+  `);
+  
+  const admin = process.env.ADMIN_EMAIL;
+  await Promise.all([
+    sendMailSafe({ to: userEmail, subject: `Order Processing - ${order.id}`, html }),
+    admin ? sendMailSafe({ to: admin, subject: `Order Processing - ${order.id}`, html }) : Promise.resolve(),
+  ]);
+}
+
 async function sendWelcomeEmail(email, name, tempPassword) {
   const subject = 'Welcome to Grain Fusion - Your Account Created';
   const resetUrl = `${process.env.FRONTEND_URL || ''}/forgot-password`;
@@ -322,6 +383,9 @@ module.exports = {
   sendOTPEmail,
   sendOrderCreatedEmail,
   sendOrderCancelledEmail,
+  sendOrderShippedEmail,
+  sendOrderDeliveredEmail,
+  sendOrderProcessingEmail,
   sendWelcomeEmail,
   sendPasswordResetEmail,
   sendTestEmail,

@@ -10,6 +10,9 @@ const logger = require("../utils/logger");
 const {
   sendOrderCreatedEmail,
   sendOrderCancelledEmail,
+  sendOrderShippedEmail,
+  sendOrderDeliveredEmail,
+  sendOrderProcessingEmail,
 } = require("../utils/emailService");
 const { createInvoiceFromOrder } = require("./invoiceController");
 /**
@@ -161,13 +164,18 @@ exports.getOrderById = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const orderId = req.params.id;
+    const isAdmin = req.user.role === "admin";
 
     logger.info("orders:getOrderById:start", {
       userId,
       orderId,
+      isAdmin,
     });
 
-    const order = await Order.findOne({ _id: orderId, user_id: userId })
+    // Admin can view any order, regular users can only view their own
+    const query = isAdmin ? { _id: orderId } : { _id: orderId, user_id: userId };
+
+    const order = await Order.findOne(query)
       .populate("shipping_address_id")
       .lean();
 
@@ -175,6 +183,7 @@ exports.getOrderById = async (req, res, next) => {
       logger.warn("orders:getOrderById:not_found", {
         userId,
         orderId,
+        isAdmin,
       });
       return res
         .status(404)
@@ -768,7 +777,7 @@ exports.createOrder = async (req, res, next) => {
  */
 exports.updateOrderStatus = async (req, res, next) => {
   try {
-    const { status, shipmentDetails } = req.body;
+    const { status, shipmentDetails, shipment } = req.body;
     const orderId = req.params.id;
 
     logger.info("orders:updateOrderStatus:start", {
@@ -792,12 +801,63 @@ exports.updateOrderStatus = async (req, res, next) => {
       });
     }
 
-    // Build update object
-    const updateData = { status };
+    // Get current order to check current status
+    let query = { _id: orderId };
+    if (!req.user.role || req.user.role !== "admin") {
+      query.user_id = req.user._id;
+    }
+
+    const currentOrder = await Order.findOne(query).lean();
+    if (!currentOrder) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    const currentStatus = currentOrder.status;
+
+    // Validate status transitions
+    const validTransitions = {
+      pending: ["processing", "shipped", "cancelled"],
+      processing: ["pending", "shipped", "cancelled"],
+      shipped: ["delivered"],
+      delivered: [],
+      cancelled: [],
+    };
+
+    // Check if transition is valid
+    if (currentStatus !== status) {
+      const allowedTransitions = validTransitions[currentStatus] || [];
+      if (!allowedTransitions.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot change status from "${currentStatus}" to "${status}". Allowed transitions: ${
+            allowedTransitions.length > 0 
+              ? allowedTransitions.join(", ") 
+              : "None (final state)"
+          }`,
+        });
+      }
+    }
+
+    // Build update object with status history
+    const statusHistoryEntry = {
+      status: status,
+      changedBy: req.user._id,
+      changedAt: new Date(),
+      comment: req.body.comment || "",
+    };
+
+    const updateData = { 
+      status,
+      $push: { statusHistory: statusHistoryEntry },
+    };
 
     // If status is shipped, handle shipment details
-    if (status === "shipped" && shipmentDetails) {
-      if (!shipmentDetails.deliveryPartner || !shipmentDetails.trackingNumber) {
+    const shipmentData = shipmentDetails || shipment;
+    if (status === "shipped" && shipmentData) {
+      if (!shipmentData.deliveryPartner || !shipmentData.trackingNumber) {
         return res.status(400).json({
           success: false,
           message:
@@ -806,26 +866,21 @@ exports.updateOrderStatus = async (req, res, next) => {
       }
 
       updateData.shipment = {
-        deliveryPartner: shipmentDetails.deliveryPartner,
-        trackingNumber: shipmentDetails.trackingNumber,
-        estimatedDelivery: shipmentDetails.estimatedDelivery || null,
+        deliveryPartner: shipmentData.deliveryPartner,
+        trackingNumber: shipmentData.trackingNumber,
+        estimatedDelivery: shipmentData.estimatedDelivery || null,
         shippedAt: new Date(),
       };
     }
 
-    // For regular users, they can only access their own orders
-    // For admin route, we'll check if user is admin (implement role-based access)
-    let query = { _id: orderId };
-
-    // If not admin, restrict to user's own orders
-    if (!req.user.role || req.user.role !== "admin") {
-      query.user_id = req.user._id;
-    }
-
+    // Update the order
     const order = await Order.findOneAndUpdate(query, updateData, {
       new: true,
       runValidators: true,
-    }).lean();
+    })
+    .populate("user_id")
+    .populate("shipping_address_id")
+    .lean();
 
     if (!order) {
       return res.status(404).json({
@@ -834,10 +889,44 @@ exports.updateOrderStatus = async (req, res, next) => {
       });
     }
 
+    // Send email notifications based on status change
+    const userEmail = order.user_id?.email;
+    if (userEmail && currentStatus !== status) {
+      try {
+        // Send different emails based on status
+        if (status === "shipped" && shipmentData) {
+          await sendOrderShippedEmail(order, userEmail, shipmentData);
+          logger.info("orders:updateOrderStatus:shipped_email_sent", {
+            orderId,
+            userEmail,
+          });
+        } else if (status === "delivered") {
+          await sendOrderDeliveredEmail(order, userEmail);
+          logger.info("orders:updateOrderStatus:delivered_email_sent", {
+            orderId,
+            userEmail,
+          });
+        } else if (status === "processing") {
+          await sendOrderProcessingEmail(order, userEmail);
+          logger.info("orders:updateOrderStatus:processing_email_sent", {
+            orderId,
+            userEmail,
+          });
+        }
+      } catch (emailError) {
+        logger.error("orders:updateOrderStatus:email_failed", {
+          orderId,
+          status,
+          error: emailError.message,
+        });
+        // Don't fail the request if email fails
+      }
+    }
+
     // Format order
     order.id = order._id.toString();
-    order.user_id = order.user_id.toString();
-    order.shipping_address_id = order.shipping_address_id.toString();
+    order.user_id = order.user_id._id ? order.user_id._id.toString() : order.user_id.toString();
+    order.shipping_address_id = order.shipping_address_id?._id ? order.shipping_address_id._id.toString() : order.shipping_address_id.toString();
     order.created_at = order.createdAt;
     order.updated_at = order.updatedAt;
     delete order._id;
@@ -960,6 +1049,13 @@ exports.getAllOrders = async (req, res, next) => {
           shipping_address_id: { $toString: "$shipping_address_id" },
           created_at: "$createdAt",
           updated_at: "$updatedAt",
+          shipment: 1,
+          coupon_code: 1,
+          discount_amount: 1,
+          delivery_charges: 1,
+          delivery_type: 1,
+          tax_amount: 1,
+          tax_rate: 1,
           order_items: {
             $map: {
               input: "$order_items",
@@ -972,7 +1068,16 @@ exports.getAllOrders = async (req, res, next) => {
                 price: "$$item.price",
                 created_at: "$$item.created_at",
                 product: {
+                  id: { $toString: "$$item.product._id" },
                   name: { $ifNull: ["$$item.product.name", "Unknown"] },
+                  description: "$$item.product.description",
+                  price: "$$item.product.price",
+                  original_price: "$$item.product.original_price",
+                  category: "$$item.product.category",
+                  images: "$$item.product.images",
+                  in_stock: "$$item.product.in_stock",
+                  rating: "$$item.product.rating",
+                  reviews_count: "$$item.product.reviews_count",
                 },
               },
             },

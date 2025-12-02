@@ -33,6 +33,29 @@ const orderSchema = new mongoose.Schema(
     cancelled_at: { type: Date },
     cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 
+    // Status History
+    statusHistory: [{
+      status: {
+        type: String,
+        enum: ['pending', 'processing', 'shipped', 'delivered', 'cancelled'],
+        required: true,
+      },
+      changedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true,
+      },
+      changedAt: {
+        type: Date,
+        default: Date.now,
+        required: true,
+      },
+      comment: {
+        type: String,
+        default: '',
+      },
+    }],
+
     // Shipment details (for shipped orders)
     shipment: {
       deliveryPartner: {
