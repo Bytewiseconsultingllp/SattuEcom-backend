@@ -455,17 +455,10 @@ exports.getTopCategories = async (req, res, next) => {
       }
     ]);
 
-    // If no data from aggregation, return mock data
-    const categoryData = topCategories.length > 0 ? topCategories : [
-      { name: 'Sattu Powder', sales: 45000, orders: 234 },
-      { name: 'Sattu Drinks', sales: 38000, orders: 198 },
-      { name: 'Sattu Snacks', sales: 32000, orders: 167 },
-      { name: 'Gift Packs', sales: 28000, orders: 145 }
-    ];
-
+    // Return actual data or empty array if no data exists
     return res.json({
       success: true,
-      data: categoryData
+      data: topCategories.length > 0 ? topCategories : []
     });
   } catch (error) {
     console.error('Top categories error:', error);
@@ -561,17 +554,10 @@ exports.getTopProducts = async (req, res, next) => {
       }
     ]);
 
-    // If no data from aggregation, return mock data
-    const productData = topProducts.length > 0 ? topProducts : [
-      { name: 'Premium Sattu Powder 1kg', sales: 234, revenue: 23400 },
-      { name: 'Sattu Energy Drink Mix', sales: 198, revenue: 19800 },
-      { name: 'Roasted Sattu Snacks', sales: 167, revenue: 16700 },
-      { name: 'Sattu Gift Hamper', sales: 145, revenue: 14500 }
-    ];
-
+    // Return actual data or empty array if no data exists
     return res.json({
       success: true,
-      data: productData
+      data: topProducts.length > 0 ? topProducts : []
     });
   } catch (error) {
     console.error('Top products error:', error);
