@@ -64,10 +64,10 @@ async function generateInvoicePDF(invoiceData, companySettings = {}) {
         return Number.isFinite(num) ? num : 0;
       };
 
-      // Option A: safe PDF formatting — prefix ₹ and use toLocaleString for thousands separators
+      // ✅ UPDATED: Remove rupee symbol, just format the number
       const formatCurrency = (amount) => {
         const n = parseAmount(amount);
-        return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       };
 
       const formatDate = (date) => {
@@ -182,10 +182,12 @@ async function generateInvoicePDF(invoiceData, companySettings = {}) {
       let rightY = yPosition;
       doc.fontSize(9).fillColor(primaryColor).font('Helvetica-Bold').text('BILL TO:', rightColX, rightY);
       rightY += 12;
-      const customerName = shippingAddr.full_name || shippingAddr.fullName || invoiceData.userName || 'Customer Name';
+      // ✅ FIX: Use snake_case field names
+      const customerName = shippingAddr.full_name || shippingAddr.fullName || invoiceData.user_name || invoiceData.userName || 'Customer Name';
       doc.fontSize(9).fillColor(textColor).font('Helvetica-Bold').text(customerName, rightColX, rightY);
       rightY += 12;
-      const phoneEmail = `Phone: ${shippingAddr.phone || 'N/A'} | Email: ${invoiceData.userEmail || 'N/A'}`;
+      // ✅ FIX: Use snake_case field names
+      const phoneEmail = `Phone: ${shippingAddr.phone || invoiceData.user_phone || 'N/A'} | Email: ${invoiceData.user_email || invoiceData.userEmail || 'N/A'}`;
       doc.fontSize(8).fillColor(textColor).font('Helvetica').text(phoneEmail, rightColX, rightY, { width: colWidth });
       rightY += doc.heightOfString(phoneEmail, { width: colWidth }) + 6;
 
@@ -209,14 +211,32 @@ async function generateInvoicePDF(invoiceData, companySettings = {}) {
       const detailSecondX = detailFirstX + detailColWidth + 15;
       const detailThirdX = rightColX;
 
-      doc.fontSize(8).fillColor(lightText).font('Helvetica').text(`Invoice #: ${invoiceData.invoiceNumber || 'N/A'}`, detailFirstX, yPosition, { width: detailColWidth });
-      doc.text(`Invoice Date: ${formatDate(invoiceData.issueDate)}`, detailSecondX, yPosition, { width: detailColWidth });
-      doc.text(`Due Date: ${formatDate(invoiceData.dueDate || invoiceData.issueDate)}`, detailThirdX, yPosition, { width: 220, align: 'right' });
+      // ✅ FIX: Use snake_case field names
+      doc.fontSize(8).fillColor(lightText).font('Helvetica').text(`Invoice #: ${invoiceData.invoice_number || invoiceData.invoiceNumber || 'N/A'}`, detailFirstX, yPosition, { width: detailColWidth });
+      doc.text(`Invoice Date: ${formatDate(invoiceData.issue_date || invoiceData.issueDate)}`, detailSecondX, yPosition, { width: detailColWidth });
+      
+      // ✅ NEW: Conditionally show Due Date only for offline sales with pending payment
+      const saleType = invoiceData.sale_type || 'online';
+      const paymentStatus = invoiceData.payment_status || 'pending';
+      const isOffline = saleType === 'offline';
+      const isPending = paymentStatus !== 'paid';
+      
+      if (isOffline && isPending) {
+        doc.fillColor('#FF6B35').font('Helvetica-Bold').text(`Due Date: ${formatDate(invoiceData.due_date || invoiceData.dueDate || invoiceData.issue_date || invoiceData.issueDate)}`, detailThirdX, yPosition, { width: 220, align: 'right' });
+      } else {
+        // Show payment status for online or paid invoices
+        const statusLabel = paymentStatus === 'paid' ? 'Status: PAID' : `Sale Type: ${saleType.toUpperCase()}`;
+        doc.fillColor(paymentStatus === 'paid' ? '#10B981' : lightText).font('Helvetica-Bold').text(statusLabel, detailThirdX, yPosition, { width: 220, align: 'right' });
+      }
 
       yPosition += 14;
 
       const invoiceOrderId = invoiceData.order_id || invoiceData.orderId || 'N/A';
       doc.fontSize(8).fillColor(lightText).font('Helvetica').text(`Order ID: ${invoiceOrderId}`, detailFirstX, yPosition, { width: detailColWidth });
+      
+      // ✅ NEW: Always show Sale Type
+      const saleTypeDisplay = (invoiceData.sale_type || 'online').toUpperCase();
+      doc.fontSize(8).fillColor(lightText).font('Helvetica').text(`Sale Type: ${saleTypeDisplay}`, detailSecondX, yPosition, { width: detailColWidth });
 
       yPosition += 18;
 
@@ -315,16 +335,14 @@ async function generateInvoicePDF(invoiceData, companySettings = {}) {
       const appliedDiscount = isOfflineSale ? discountAmount : 0;
       const appliedCoupon = isOnlineSale ? (couponDiscount || discountAmount) : 0;
 
-      // GST handling
-      let gstAmount = parseAmount(invoiceData.gst_amount ?? invoiceData.tax ?? invoiceData.tax_amount ?? 0);
-      if (isOnlineSale) {
-        if (gstAmount === 0) {
-          const taxableBase = subtotal - appliedCoupon + giftPrice;
-          gstAmount = (taxableBase * 5) / 100;
-        }
-      } else {
-        gstAmount = 0; // offline: GST included in subtotal
+      // ✅ FIX: Use stored tax amount from invoice, don't recalculate!
+      let gstAmount = parseAmount(invoiceData.tax_amount ?? invoiceData.gst_amount ?? invoiceData.tax ?? 0);
+      
+      // For offline sales, GST is included in subtotal (set to 0 for display)
+      if (isOfflineSale) {
+        gstAmount = 0;
       }
+      // For online sales, use the exact tax_amount from the invoice (already calculated and stored)
 
       // final total calculation: prefer invoiceData.total or invoiceData.total_amount if provided
       const providedTotal = parseAmount(invoiceData.total ?? invoiceData.total_amount ?? invoiceData.totalAmount ?? 0);
@@ -344,7 +362,7 @@ async function generateInvoicePDF(invoiceData, companySettings = {}) {
       // Subtotal label
       const subtotalLabel = isOfflineSale ? 'Subtotal (GST 5% Inclusive):' : 'Subtotal:';
 
-      doc.fontSize(9).fillColor(textColor).font('Helvetica').text(subtotalLabel, summaryLabelX, yPosition, { width: summaryLabelWidth, align: 'right' });
+      doc.fontSize(9).fillColor(textColor).font('Helvetica').text(subtotalLabel, 380, yPosition);
       doc.text(formatCurrency(subtotal), valueX, yPosition, { width: 80, align: 'right' });
       yPosition += 14;
 

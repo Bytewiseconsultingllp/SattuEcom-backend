@@ -1,6 +1,7 @@
 const OfflineSale = require('../models/OfflineSale');
 const User = require('../models/User');
 const Order = require('../models/Order');
+const Invoice = require('../models/Invoice');
 const crypto = require('crypto');
 const { sendPasswordResetEmail } = require('../utils/emailService');
 const { createInvoiceFromOrder } = require('./invoiceController');
@@ -29,21 +30,22 @@ exports.getOfflineSales = async (req, res, next) => {
       }
     }
 
+    // ✅ FIX: Use snake_case field names for queries
     if (paymentMethod) {
-      query.paymentMethod = paymentMethod;
+      query.payment_method = paymentMethod;
     }
 
     if (gstType) {
-      query.gstType = gstType;
+      query.gst_type = gstType;
     }
 
     if (q) {
       const regex = new RegExp(String(q).trim(), 'i');
       query.$or = [
-        { customerName: regex },
-        { customerPhone: regex },
-        { customerEmail: regex },
-        { invoiceNumber: regex },
+        { customer_name: regex },
+        { customer_phone: regex },
+        { customer_email: regex },
+        { invoice_number: regex },
       ];
     }
 
@@ -68,6 +70,31 @@ exports.getOfflineSales = async (req, res, next) => {
       OfflineSale.countDocuments(query),
     ]);
 
+    // Fetch invoice status for sales that have invoices
+    const salesWithInvoiceStatus = await Promise.all(
+      sales.map(async (sale) => {
+        if (sale.invoice_number) {
+          try {
+            const invoice = await Invoice.findOne({ invoice_number: sale.invoice_number })
+              .select('payment_status sale_type')
+              .lean();
+            return {
+              ...sale,
+              invoice_payment_status: invoice?.payment_status || 'pending',
+              invoice_sale_type: invoice?.sale_type || 'offline',
+            };
+          } catch (err) {
+            logger.error('offlineSales:fetch_invoice_status:error', {
+              invoice_number: sale.invoice_number,
+              error: err.message,
+            });
+            return sale;
+          }
+        }
+        return sale;
+      })
+    );
+
     logger.info('offlineSales:list:success', {
       page,
       limit,
@@ -77,12 +104,12 @@ exports.getOfflineSales = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      count: sales.length,
+      count: salesWithInvoiceStatus.length,
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
-      data: sales,
+      data: salesWithInvoiceStatus,
     });
   } catch (error) {
     logger.error('offlineSales:list:error', {
@@ -138,7 +165,7 @@ exports.sendCredentialForSale = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Sale has no customer email' });
     }
 
-    await sendPasswordResetEmail(sale.customerEmail, sale.customerName || '');
+    await sendPasswordResetEmail(sale.customer_email, sale.customer_name || '');  // ✅ FIX: Use snake_case
 
     logger.info('offlineSales:send_credential_for_sale:success', {
       saleId: sale._id.toString(),
@@ -256,17 +283,18 @@ exports.createOfflineSale = async (req, res, next) => {
       itemsCount: items.length,
     });
 
+    // ✅ FIX: Map camelCase from frontend to snake_case for model
     const sale = await OfflineSale.create({
       date: date ? new Date(date) : new Date(),
-      customerName,
-      customerPhone,
-      customerEmail,
+      customer_name: customerName,        // ✅ snake_case
+      customer_phone: customerPhone,      // ✅ snake_case
+      customer_email: customerEmail,      // ✅ snake_case
       items,
-      totalAmount: parsedTotalAmount,
-      finalAmount: parsedFinalAmount,
+      total_amount: parsedTotalAmount,    // ✅ snake_case
+      final_amount: parsedFinalAmount,    // ✅ snake_case
       discount: discount || 0,
-      gstType: gstType || 'non-gst',
-      paymentMethod: paymentMethod || 'cash',
+      gst_type: gstType || 'non-gst',     // ✅ snake_case
+      payment_method: paymentMethod || 'cash',  // ✅ snake_case
       notes: notes || '',
     });
 
@@ -321,43 +349,44 @@ exports.createOfflineSale = async (req, res, next) => {
     });
 
     let invoice = null;
-    if ((sale.gstType || '').toLowerCase() === 'gst') {
+    // ✅ FIX: Use snake_case field from model
+    if ((sale.gst_type || '').toLowerCase() === 'gst') {
       try {
         logger.info('offlineSales:create:creating_invoice', {
           saleId: sale._id.toString(),
           orderId: order._id.toString(),
-          gstType: sale.gstType,
+          gst_type: sale.gst_type,  // ✅ snake_case
         });
+        // ✅ FIX: Use snake_case for all fields matching Invoice model
         const invoicePayload = {
           user_id: user._id,
           items: (sale.items || []).map((item) => ({
-            product_name: item.product,
             name: item.product,
             description: item.description || '',
             quantity: item.quantity,
             price: item.price,
           })),
-          subtotal: sale.totalAmount,
+          subtotal: sale.total_amount,          // ✅ Use snake_case from model
           discount_amount: sale.discount || 0,
           coupon_discount: 0,
           gift_price: 0,
-          shipping_charges: 0,
           delivery_charges: 0,
-          gst_amount: sale.tax || 0,
-          total_amount: sale.finalAmount,
-          payment_method: sale.paymentMethod || paymentMethod || 'cash',
+          tax_amount: sale.tax || 0,
+          total_amount: sale.final_amount,      // ✅ Use snake_case from model
+          payment_status: 'pending',
+          payment_method: sale.payment_method || paymentMethod || 'cash',  // ✅ Use snake_case
           billing_address: {
-            fullName: sale.customerName,
-            phone: sale.customerPhone,
-            addressLine1: 'Offline sale purchase',
+            full_name: sale.customer_name,      // ✅ Use snake_case from model
+            phone: sale.customer_phone,         // ✅ Use snake_case from model
+            address_line1: 'Offline sale purchase',
           },
           shipping_address: {
-            fullName: sale.customerName,
-            phone: sale.customerPhone,
-            addressLine1: 'Offline sale purchase',
+            full_name: sale.customer_name,      // ✅ Use snake_case from model
+            phone: sale.customer_phone,         // ✅ Use snake_case from model
+            address_line1: 'Offline sale purchase',
           },
           notes: sale.notes || 'Thank you for your purchase!',
-          sale_type:'offline',
+          sale_type: 'offline',  // ✅ REQUIRED FIELD
         };
 
         invoice = await createInvoiceFromOrder(order._id, invoicePayload, null);
@@ -366,14 +395,15 @@ exports.createOfflineSale = async (req, res, next) => {
           saleId: sale._id.toString(),
           orderId: order._id.toString(),
           invoiceId: invoice._id.toString(),
-          invoiceNumber: invoice.invoiceNumber,
+          invoice_number: invoice.invoice_number,  // ✅ Use snake_case
         });
 
+        // ✅ FIX: Use snake_case for invoice_number field
         order.invoice_id = invoice._id;
-        order.invoice_number = invoice.invoiceNumber;
+        order.invoice_number = invoice.invoice_number;
         await order.save();
 
-        sale.invoiceNumber = invoice.invoiceNumber;
+        sale.invoice_number = invoice.invoice_number;  // ✅ Use snake_case field
         await sale.save();
       } catch (invoiceError) {
         logger.error('offlineSales:create:invoice_creation_failed', {
@@ -394,7 +424,7 @@ exports.createOfflineSale = async (req, res, next) => {
         invoice: invoice
           ? {
               id: invoice._id.toString(),
-              invoiceNumber: invoice.invoiceNumber,
+              invoice_number: invoice.invoice_number,
             }
           : null,
         isNewCustomer,
@@ -441,7 +471,7 @@ exports.updateOfflineSale = async (req, res, next) => {
     if (totalAmount) updateData.totalAmount = totalAmount;
     if (finalAmount !== undefined) updateData.finalAmount = finalAmount;
     if (discount !== undefined) updateData.discount = discount;
-    if (gstType) updateData.gstType = gstType;
+    if (gstType) updateData.gst_type = gstType;  // ✅ FIX: Use snake_case
     if (paymentMethod) updateData.paymentMethod = paymentMethod;
     if (notes !== undefined) updateData.notes = notes;
 
@@ -533,7 +563,7 @@ exports.getOfflineSalesStats = async (req, res, next) => {
 
     const totalSales = sales.length;
     // Use finalAmount if available, otherwise use totalAmount
-    const totalRevenue = sales.reduce((sum, sale) => sum + (sale.finalAmount || sale.totalAmount), 0);
+    const totalRevenue = sales.reduce((sum, sale) => sum + (sale.final_amount || sale.total_amount), 0);  // ✅ FIX: Use snake_case
     const totalDiscount = sales.reduce((sum, sale) => sum + (sale.discount || 0), 0);
     const averageOrderValue = totalSales > 0 ? totalRevenue / totalSales : 0;
 
@@ -541,18 +571,18 @@ exports.getOfflineSalesStats = async (req, res, next) => {
     const paymentMethodBreakdown = {};
     
     sales.forEach((sale) => {
-      // GST breakdown
-      if (sale.gstType === 'gst') {
-        gstBreakdown.gst += sale.finalAmount || sale.totalAmount;
+      // GST breakdown - ✅ FIX: Use snake_case for all fields
+      if (sale.gst_type === 'gst') {
+        gstBreakdown.gst += sale.final_amount || sale.total_amount;
       } else {
-        gstBreakdown.nonGst += sale.finalAmount || sale.totalAmount;
+        gstBreakdown.nonGst += sale.final_amount || sale.total_amount;  // ✅ FIX: Use snake_case
       }
 
-      // Payment method breakdown
-      if (!paymentMethodBreakdown[sale.paymentMethod]) {
-        paymentMethodBreakdown[sale.paymentMethod] = 0;
+      // Payment method breakdown - ✅ FIX: Use snake_case
+      if (!paymentMethodBreakdown[sale.payment_method]) {
+        paymentMethodBreakdown[sale.payment_method] = 0;
       }
-      paymentMethodBreakdown[sale.paymentMethod] += sale.finalAmount || sale.totalAmount;
+      paymentMethodBreakdown[sale.payment_method] += sale.final_amount || sale.total_amount;
     });
 
     res.status(200).json({
@@ -602,8 +632,9 @@ exports.exportOfflineSales = async (req, res, next) => {
       date: { $gte: startDate, $lte: endDate },
     };
 
+    // ✅ FIX: Use snake_case for query
     if (gstType) {
-      findQuery.gstType = gstType;
+      findQuery.gst_type = gstType;
     }
 
     const sales = await OfflineSale.find(findQuery).sort({ date: -1 });
@@ -633,20 +664,21 @@ exports.exportOfflineSales = async (req, res, next) => {
       const qtyStr = sale.items.map((i) => i.quantity).join('; ');
       const priceStr = sale.items.map((i) => i.price).join('; ');
 
+      // ✅ FIX: Use snake_case field names
       csvContent += [
         new Date(sale.date).toISOString().split('T')[0],
-        `"${sale.customerName}"`,
-        sale.customerPhone,
-        sale.customerEmail,
+        `"${sale.customer_name}"`,
+        sale.customer_phone,
+        sale.customer_email,
         `"${itemsStr}"`,
         `"${qtyStr}"`,
         `"${priceStr}"`,
-        sale.totalAmount,
+        sale.total_amount,
         sale.discount || 0,
-        sale.finalAmount || sale.totalAmount,
-        sale.gstType,
-        sale.invoiceNumber || '',
-        sale.paymentMethod,
+        sale.final_amount || sale.total_amount,
+        sale.gst_type,
+        sale.invoice_number || '',
+        sale.payment_method,
         `"${sale.notes || ''}"`,
       ].join(',') + '\n';
     });

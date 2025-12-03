@@ -2,25 +2,27 @@ const mongoose = require('mongoose');
 
 const offlineSaleSchema = new mongoose.Schema(
   {
+    // ✅ STANDARDIZED: snake_case for all fields
     date: {
       type: Date,
-      required: [true, 'Sale date is required'],
+      required: true,
       default: Date.now,
+      index: true,
     },
-    customerName: {
+    customer_name: {
       type: String,
-      required: [true, 'Customer name is required'],
+      required: true,
       trim: true,
     },
-    customerPhone: {
+    customer_phone: {
       type: String,
-      required: [true, 'Customer phone is required'],
+      required: true,
+      trim: true,
     },
-    customerEmail: {
+    customer_email: {
       type: String,
-      required: [true, 'Customer email is required'],
+      trim: true,
       lowercase: true,
-      trim: true,
     },
     items: [
       {
@@ -38,78 +40,62 @@ const offlineSaleSchema = new mongoose.Schema(
           required: true,
           min: 0,
         },
+        description: {
+          type: String,
+        },
       },
     ],
-    totalAmount: {
+    total_amount: {
       type: Number,
-      required: [false, 'Total amount is required'],
+      required: true,
       min: 0,
     },
-    // GST Fields
-    gstType: {
+    gst_type: {
       type: String,
       enum: ['gst', 'non-gst'],
       default: 'non-gst',
     },
-    invoiceNumber: {
-      type: String,
-      default: '',
+    tax: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
-    // Discount Field
     discount: {
       type: Number,
       default: 0,
       min: 0,
     },
-    finalAmount: {
+    final_amount: {
       type: Number,
-      required: [true, 'Final amount is required'],
+      required: true,
       min: 0,
     },
-    paymentMethod: {
+    payment_method: {
       type: String,
-      enum: ['cash', 'card', 'upi', 'cheque', 'bank-transfer'],
+      enum: ['cash', 'card', 'upi', 'netbanking', 'other'],
       default: 'cash',
+    },
+    invoice_number: {
+      type: String,
+      unique: true,
+      sparse: true,
+      index: true,
     },
     notes: {
       type: String,
-      default: '',
+      trim: true,
     },
   },
   {
     timestamps: true,
-    toJSON: {
-      virtuals: true,
-      transform: function (doc, ret) {
-        ret.id = ret._id;
-        delete ret._id;
-        delete ret.__v;
-        ret.created_at = ret.createdAt;
-        ret.updated_at = ret.updatedAt;
-        delete ret.createdAt;
-        delete ret.updatedAt;
-        return ret;
-      },
-    },
-    toObject: {
-      virtuals: true,
-      transform: function (doc, ret) {
-        ret.id = ret._id;
-        delete ret._id;
-        delete ret.__v;
-        ret.created_at = ret.createdAt;
-        ret.updated_at = ret.updatedAt;
-        delete ret.createdAt;
-        delete ret.updatedAt;
-        return ret;
-      },
-    },
   }
 );
 
-// Index for faster queries
+// Indexes
 offlineSaleSchema.index({ date: -1 });
-offlineSaleSchema.index({ customerPhone: 1 });
-offlineSaleSchema.index({ paymentMethod: 1 });
+offlineSaleSchema.index({ customer_phone: 1 });
+offlineSaleSchema.index({ customer_email: 1 });
+offlineSaleSchema.index({ payment_method: 1 });
+offlineSaleSchema.index({ gst_type: 1 });
 
 module.exports = mongoose.model('OfflineSale', offlineSaleSchema);

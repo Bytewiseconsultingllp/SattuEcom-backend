@@ -2,51 +2,48 @@ const mongoose = require('mongoose');
 
 const invoiceSchema = new mongoose.Schema(
   {
-    invoiceNumber: {
+    // ✅ STANDARDIZED: snake_case for all main fields
+    invoice_number: {
       type: String,
       required: true,
       unique: true,
       index: true,
     },
-    orderId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Order',
-      required: true,
-      index: true,
-    },
-    order_id: {
-      type: String,
-      index: true,
-    },
-    userId: {
+    user_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
       required: true,
       index: true,
     },
-    // Invoice Details
+    order_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Order',
+      required: true,
+      index: true,
+    },
+    
+    // Invoice Items
     items: [
       {
-        productId: {
+        product_id: {
           type: mongoose.Schema.Types.ObjectId,
           ref: 'Product',
         },
         name: String,
         description: String,
         quantity: Number,
-        rate: Number,
+        price: Number,
         amount: Number,
       },
     ],
+    
+    // Amounts - All snake_case
     subtotal: {
       type: Number,
       required: true,
-    },
-    tax: {
-      type: Number,
       default: 0,
     },
-    discount: {
+    discount_amount: {
       type: Number,
       default: 0,
     },
@@ -58,43 +55,44 @@ const invoiceSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-    shippingCharges: {
-      type: Number,
-      default: 0,
-    },
     delivery_charges: {
       type: Number,
       default: 0,
     },
-    gst_amount: {
+    tax_amount: {
       type: Number,
       default: 0,
     },
-    total: {
+    total_amount: {
       type: Number,
       required: true,
     },
+    
     // Dates
-    issueDate: {
+    issue_date: {
       type: Date,
       default: Date.now,
     },
-    dueDate: {
+    due_date: {
       type: Date,
     },
+    
     // Payment Info
-    paymentStatus: {
+    payment_status: {
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
+      index: true,
     },
-    paymentMethod: {
+    payment_method: {
       type: String,
+      default: 'UPI',
     },
-    paymentDate: {
+    payment_date: {
       type: Date,
     },
-    // Razorpay Payment ID (for online payments)
+    
+    // Razorpay Info (for online payments)
     razorpay_payment_id: {
       type: String,
       index: true,
@@ -102,59 +100,68 @@ const invoiceSchema = new mongoose.Schema(
     razorpay_order_id: {
       type: String,
     },
-    // Sale Type
+    
+    // Sale Type - REQUIRED
     sale_type: {
       type: String,
       enum: ['online', 'offline'],
+      required: true,
       default: 'online',
       index: true,
     },
-    // UPI Payment Details (for offline sales)
+    
+    // UPI Details (for offline sales)
     upi_qr_code: {
       type: String, // Base64 encoded QR code
     },
     upi_id: {
       type: String,
     },
-    // Billing Address
-    billingAddress: {
-      fullName: String,
+    
+    // Addresses
+    billing_address: {
+      full_name: String,
       phone: String,
-      addressLine1: String,
-      addressLine2: String,
+      email: String,
+      address_line1: String,
+      address_line2: String,
       city: String,
       state: String,
-      postalCode: String,
+      postal_code: String,
       country: String,
     },
-    // Shipping Address
-    shippingAddress: {
-      fullName: String,
+    shipping_address: {
+      full_name: String,
       phone: String,
-      addressLine1: String,
-      addressLine2: String,
+      email: String,
+      address_line1: String,
+      address_line2: String,
       city: String,
       state: String,
-      postalCode: String,
+      postal_code: String,
       country: String,
     },
+    
     // Additional Info
     notes: {
       type: String,
     },
     terms: {
       type: String,
-      default: 'Payment due within 30 days',
+      default: 'Payment due within 30 days. All sales are final.',
     },
+    
     // PDF URL (if stored)
-    pdfUrl: {
+    pdf_url: {
       type: String,
     },
+    
     // Status
     status: {
       type: String,
       enum: ['draft', 'issued', 'paid', 'overdue', 'cancelled'],
       default: 'issued',
+      index: true,
     },
   },
   {
@@ -162,23 +169,25 @@ const invoiceSchema = new mongoose.Schema(
   }
 );
 
-// Index for faster queries
+// Indexes for performance
+invoiceSchema.index({ user_id: 1, createdAt: -1 });
+invoiceSchema.index({ order_id: 1 });
+invoiceSchema.index({ sale_type: 1 });
+invoiceSchema.index({ payment_status: 1 });
 invoiceSchema.index({ createdAt: -1 });
-invoiceSchema.index({ userId: 1, createdAt: -1 });
-invoiceSchema.index({ status: 1 });
 
 // Static method to generate next invoice number
 invoiceSchema.statics.generateInvoiceNumber = async function () {
   try {
-    const latestInvoice = await this.findOne({}, { invoiceNumber: 1 })
+    const latestInvoice = await this.findOne({}, { invoice_number: 1 })
       .sort({ createdAt: -1 })
       .lean();
 
     let nextNumber = 1;
 
-    if (latestInvoice && latestInvoice.invoiceNumber) {
-      // Extract the last numeric chunk from whatever the current invoiceNumber is
-      const str = String(latestInvoice.invoiceNumber);
+    if (latestInvoice && latestInvoice.invoice_number) {
+      // Extract the last numeric chunk from the invoice number
+      const str = String(latestInvoice.invoice_number);
       const digitMatches = str.match(/(\d+)/g);
       if (digitMatches && digitMatches.length > 0) {
         const lastDigits = digitMatches[digitMatches.length - 1];
@@ -198,15 +207,15 @@ invoiceSchema.statics.generateInvoiceNumber = async function () {
 
 // Method to check if invoice is overdue
 invoiceSchema.methods.isOverdue = function () {
-  if (this.paymentStatus === 'paid' || !this.dueDate) {
+  if (this.payment_status === 'paid' || !this.due_date) {
     return false;
   }
-  return new Date() > this.dueDate;
+  return new Date() > this.due_date;
 };
 
 // Virtual for formatted invoice number
 invoiceSchema.virtual('formattedInvoiceNumber').get(function () {
-  return this.invoiceNumber;
+  return this.invoice_number;
 });
 
 // Ensure virtuals are included in JSON

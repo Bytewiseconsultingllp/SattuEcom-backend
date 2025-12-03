@@ -517,11 +517,8 @@ exports.createOrder = async (req, res, next) => {
     // finalTotal should come from frontend (trusted as final paid), but ensure non-negative
     const finalTotal = Math.max(0, Number(total_amount));
 
-    // Determine sale type explicitly:
-    // If razorpay_payment_id present -> online; otherwise offline.
-    // Also treat explicit payment_method !== 'cod' as online if you want; keep razorpay primary.
-    let sale_type = "online";
-    sale_type = payment_method ? "offline" : "online";
+    // ✅ EXPLICIT SALE TYPE - All orders through this API are online (with Razorpay)
+    const sale_type = "online";
     logger.debug("createOrder:sale_type", { sale_type });
 
     // Create order
@@ -678,31 +675,30 @@ exports.createOrder = async (req, res, next) => {
         gstAmount = 0;
       }
 
-      // Build invoiceData with unified field names expected by the PDF
+      // ✅ STANDARDIZED INVOICE DATA - snake_case only
       const invoiceData = {
         user_id: userId,
         items: orderItems.map((item) => ({
           product_id: item.product_id._id,
           name: item.product_id.name,
-          description: item.product_id.description,
+          description: item.product_id.description || '',
           quantity: item.quantity,
           price: item.price,
         })),
         subtotal: itemsSubtotal,
-        gst_amount: gstAmount,
-        tax: gstAmount,
-        discount_amount: sale_type === "offline" ? discount_amount : 0, // offline manual discount
-        coupon_discount: sale_type === "online" ? discount_amount || 0 : 0, // online coupon discount (we used discount_amount to hold computed coupon)
+        discount_amount: 0,  // Online orders don't have manual discount
+        coupon_discount: discount_amount || 0,  // This is the computed coupon discount
         gift_price: gift_price || 0,
         delivery_charges: delivery_charges || 0,
-        shipping_charges: delivery_charges || 0,
+        tax_amount: gstAmount,
         total_amount: finalTotal,
-        total: finalTotal,
-        payment_status: paymentData ? "completed" : "pending",
+        payment_status: paymentData ? "paid" : "pending",
         payment_method: paymentData
-          ? paymentData.payment_method || payment_method || "razorpay"
-          : payment_method || null,
-        sale_type: sale_type,
+          ? paymentData.payment_method || payment_method || "UPI"
+          : payment_method || "UPI",
+        sale_type: "online",  // ✅ EXPLICIT
+        razorpay_payment_id: razorpay_payment_id || null,
+        razorpay_order_id: razorpay_order_id || null,
         billing_address: populatedOrder.shipping_address,
         shipping_address: populatedOrder.shipping_address,
         notes: "Thank you for your order!",
@@ -712,6 +708,15 @@ exports.createOrder = async (req, res, next) => {
         orderId: order._id.toString(),
         sale_type,
         hasPaymentData: !!paymentData,
+      });
+      
+      // Debug log invoice data
+      console.log("📋 Creating invoice with data:", {
+        user_id: userId.toString(),
+        order_id: order._id.toString(),
+        items_count: invoiceData.items.length,
+        total_amount: invoiceData.total_amount,
+        sale_type: invoiceData.sale_type,
       });
 
       // Create invoice using the unified payload; pass paymentData for online orders
@@ -724,23 +729,26 @@ exports.createOrder = async (req, res, next) => {
       logger.info("createOrder:invoice_created", {
         orderId: order._id.toString(),
         invoiceId: invoice._id.toString(),
-        invoiceNumber: invoice.invoiceNumber,
+        invoice_number: invoice.invoice_number,
       });
 
       // Save invoice references on order
       order.invoice_id = invoice._id;
-      order.invoice_number = invoice.invoiceNumber;
+      order.invoice_number = invoice.invoice_number;
       await order.save();
 
       // Add invoice info to populatedOrder for response
       populatedOrder.invoice_id = invoice._id.toString();
-      populatedOrder.invoice_number = invoice.invoiceNumber;
+      populatedOrder.invoice_number = invoice.invoice_number;
     } catch (e) {
       logger.error("createOrder:invoice_creation_failed", {
         message: e?.message,
         stack: e?.stack,
         orderId: order._id?.toString(),
       });
+      // Log to console for debugging
+      console.error("❌ INVOICE CREATION ERROR:", e?.message);
+      console.error("Stack:", e?.stack);
     }
 
     res.status(201).json({

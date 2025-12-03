@@ -12,137 +12,122 @@ const logger = require('../utils/logger');
 exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) => {
   try {
     // Generate invoice number
-    const invoiceNumber = await Invoice.generateInvoiceNumber();
+    const invoice_number = await Invoice.generateInvoiceNumber();
 
     logger.info('invoice:create_from_order:start', {
       orderId: orderId ? orderId.toString() : null,
-      userId: orderData?.user_id || orderData?.userId || null,
+      user_id: orderData?.user_id,
+      sale_type: orderData?.sale_type,
       hasPaymentData: !!paymentData,
     });
 
     // Dates
-    const issueDate = new Date();
-    const dueDate = new Date(issueDate);
-    dueDate.setDate(dueDate.getDate() + 30);
+    const issue_date = new Date();
+    const due_date = new Date(issue_date);
+    due_date.setDate(due_date.getDate() + 30);
 
-    // Normalize sale type: trust explicit orderData.sale_type if provided; otherwise default to 'online' (backwards compatible).
-    let saleTypeRaw = (orderData.sale_type).toString().trim().toLowerCase();
-    let saleType = (saleTypeRaw === 'offline' || saleTypeRaw === 'online') ? saleTypeRaw : 'online';
-    const isOnlineSale = saleType === 'online';
-    const isOfflineSale = saleType === 'offline';
+    // ✅ EXPLICIT SALE TYPE - Must be provided
+    const sale_type = orderData.sale_type || 'online';
+    if (!['online', 'offline'].includes(sale_type)) {
+      throw new Error(`Invalid sale_type: ${sale_type}. Must be 'online' or 'offline'`);
+    }
+    const isOnlineSale = sale_type === 'online';
+    const isOfflineSale = sale_type === 'offline';
 
-    // Items (map compatible shapes)
+    // ✅ STANDARDIZED ITEMS - snake_case only
     const items = (orderData.items || []).map(item => ({
-      productId: item.product_id || item.productId,
+      product_id: item.product_id,
       name: item.name || item.product_name,
-      description: item.description,
+      description: item.description || '',
       quantity: item.quantity || 1,
-      rate: item.price || item.rate || 0,
-      amount: (item.quantity || 1) * (item.price || item.rate || 0),
+      price: item.price || 0,
+      amount: (item.quantity || 1) * (item.price || 0),
     }));
 
-    // Parse numeric values safely (accept many possible keys)
+    // ✅ STANDARDIZED FIELD PARSING - snake_case only
     const parseAmount = v => {
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
     };
 
-    const subtotal = parseAmount(orderData.subtotal ?? orderData.subtotal_amount ?? orderData.itemsSubtotal ?? 0);
-    const delivery_charges = parseAmount(orderData.delivery_charges ?? orderData.deliveryCharges ?? orderData.shipping_charges ?? 0);
-    const gift_price = parseAmount(orderData.gift_price ?? orderData.giftPrice ?? 0);
-    const discount_amount_raw = parseAmount(orderData.discount_amount ?? orderData.discount ?? 0); // server computed discount (coupon or manual)
-    const coupon_discount_raw = parseAmount(orderData.coupon_discount ?? orderData.couponDiscount ?? 0);
-    const provided_gst = parseAmount(orderData.gst_amount ?? orderData.tax ?? orderData.tax_amount ?? 0);
-    const provided_total = parseAmount(orderData.total_amount ?? orderData.total ?? orderData.totalAmount ?? 0);
+    const subtotal = parseAmount(orderData.subtotal || 0);
+    const delivery_charges = parseAmount(orderData.delivery_charges || 0);
+    const gift_price = parseAmount(orderData.gift_price || 0);
+    const discount_amount = parseAmount(orderData.discount_amount || 0);
+    const coupon_discount = parseAmount(orderData.coupon_discount || 0);
+    const tax_amount = parseAmount(orderData.tax_amount || 0);
+    const total_amount = parseAmount(orderData.total_amount || 0);
 
-    // Decide which discount fields to use in invoice:
-    // - Offline: use discount_amount (manual/POS discount)
-    // - Online: prefer coupon_discount if provided, otherwise fall back to discount_amount
-    const discount_amount = isOfflineSale ? discount_amount_raw : 0; // offline's "discount" (shown as Discount)
-    const coupon_discount = isOnlineSale ? (coupon_discount_raw || discount_amount_raw) : 0; // online's coupon (shown as Coupon Discount)
+    // ✅ COMPUTE FINAL TOTAL (trust provided value)
+    const final_total_amount = total_amount || subtotal;
 
-    // Compute GST for online if not provided. For offline, GST is included in subtotal (do not compute).
-    let gst_amount = provided_gst;
-    if (isOnlineSale) {
-      if (gst_amount === 0) {
-        // taxable base for GST is subtotal - coupon_discount + gift_price (coupon reduces taxable base)
-        const taxableBase = subtotal - coupon_discount + gift_price;
-        gst_amount = Math.round((taxableBase * 5) * 100) / 10000; // keep two decimals (equivalent to (taxableBase*5)/100)
-        gst_amount = (taxableBase * 5) / 100;
-      }
-    } else {
-      gst_amount = 0; // offline: GST included in subtotal
-    }
-
-    // Final total: prefer provided_total if frontend computed final amount; otherwise compute
-    let computedTotal;
-    if (isOfflineSale) {
-      computedTotal = subtotal - discount_amount;
-    } else {
-      computedTotal = subtotal + delivery_charges + gift_price + gst_amount - coupon_discount;
-    }
-    const finalTotal = provided_total || computedTotal;
-
-    // Payment status / invoice status
+    // ✅ PAYMENT STATUS - Online sales are ALWAYS paid (invoice created only after Razorpay success)
     const isOnlinePaid = paymentData && (paymentData.status === 'captured' || paymentData.status === 'authorized');
-    const paymentStatus = isOnlinePaid ? 'paid' : (orderData.payment_status || orderData.paymentStatus || 'pending');
-    const invoiceStatus = isOnlinePaid ? 'paid' : 'issued';
+    
+    // If online sale, always mark as paid (invoice only created after successful payment)
+    // If offline sale, default to pending unless explicitly marked as paid
+    let payment_status;
+    let invoice_status;
+    
+    if (isOnlineSale) {
+      // Online invoices are ALWAYS paid - they're only created after Razorpay success
+      payment_status = 'paid';
+      invoice_status = 'paid';
+    } else {
+      // Offline invoices can be pending or paid based on provided data
+      payment_status = isOnlinePaid ? 'paid' : (orderData.payment_status || 'pending');
+      invoice_status = isOnlinePaid ? 'paid' : 'issued';
+    }
 
-    // UPI QR for offline invoices (optional)
-    let upiQrCode = null;
-    let upiId = null;
+    // ✅ UPI QR for offline invoices
+    let upi_qr_code = null;
+    let upi_id = null;
     if (isOfflineSale) {
       const companySettings = await CompanySettings.findOne().lean();
-      upiId = companySettings?.upiId;
-      if (upiId) {
+      upi_id = companySettings?.upiId;
+      if (upi_id) {
         try {
           const QRCode = require('qrcode');
-          const upiString = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(companySettings.companyName || 'Store')}&am=${finalTotal}&cu=INR&tn=Invoice ${invoiceNumber}`;
-          upiQrCode = await QRCode.toDataURL(upiString);
+          const upiString = `upi://pay?pa=${upi_id}&pn=${encodeURIComponent(companySettings.companyName || 'Store')}&am=${final_total_amount}&cu=INR&tn=Invoice ${invoice_number}`;
+          upi_qr_code = await QRCode.toDataURL(upiString);
         } catch (err) {
           logger.error('invoice:create_from_order:qr_generation_failed', {
             message: err?.message,
             orderId: orderId ? orderId.toString() : null,
-            invoiceNumber,
+            invoice_number,
           });
         }
       }
     }
 
-    // Build invoice document payload (fields aligned with PDF generator)
+    // ✅ BUILD INVOICE WITH STANDARDIZED FIELDS ONLY
     const invoicePayload = {
-      invoiceNumber,
-      orderId,
-      order_id: orderId ? orderId.toString() : null,
-      userId: orderData.user_id || orderData.userId,
+      invoice_number,
+      user_id: orderData.user_id,
+      order_id: orderId,
       items,
       subtotal,
-      tax: gst_amount, // legacy field - may be unused by PDF but keep populated
-      discount: discount_amount, // offline discount
-      discount_amount: discount_amount,
-      coupon_discount: coupon_discount,
+      discount_amount,
+      coupon_discount,
       gift_price,
-      shippingCharges: delivery_charges,
-      shipping_charges: delivery_charges,
-      delivery_charges: delivery_charges,
-      gst_amount,
-      total: finalTotal,
-      total_amount: finalTotal,
-      issueDate,
-      dueDate,
-      paymentStatus,
-      paymentMethod: paymentData?.payment_method || orderData.payment_method || orderData.paymentMethod || 'UPI',
-      paymentDate: isOnlinePaid ? (orderData.paymentDate || new Date()) : (orderData.paymentDate || null),
+      delivery_charges,
+      tax_amount,
+      total_amount: final_total_amount,
+      issue_date,
+      due_date,
+      payment_status,
+      payment_method: paymentData?.payment_method || orderData.payment_method || 'UPI',
+      payment_date: (isOnlineSale || isOnlinePaid) ? new Date() : null,
       razorpay_payment_id: paymentData?.razorpay_payment_id || orderData.razorpay_payment_id || null,
       razorpay_order_id: paymentData?.razorpay_order_id || orderData.razorpay_order_id || null,
-      sale_type: saleType,
-      upi_qr_code: upiQrCode,
-      upi_id: upiId,
-      billingAddress: orderData.billing_address || orderData.billingAddress || orderData.billingAddressRaw || null,
-      shippingAddress: orderData.shipping_address || orderData.shippingAddress || orderData.shippingAddressRaw || null,
+      sale_type,
+      upi_qr_code,
+      upi_id,
+      billing_address: orderData.billing_address || null,
+      shipping_address: orderData.shipping_address || null,
       notes: orderData.notes || 'Thank you for your order!',
       terms: orderData.terms || 'Payment due within 30 days. All sales are final.',
-      status: invoiceStatus,
+      status: invoice_status,
     };
 
     // Create invoice
@@ -151,8 +136,9 @@ exports.createInvoiceFromOrder = async (orderId, orderData, paymentData = null) 
     logger.info('invoice:create_from_order:success', {
       orderId: orderId ? orderId.toString() : null,
       invoiceId: invoice._id.toString(),
-      invoiceNumber,
-      sale_type: saleType,
+      invoice_number,
+      sale_type,
+      payment_status,
     });
 
     return invoice;
@@ -190,7 +176,7 @@ exports.getAllInvoices = async (req, res, next) => {
 
     // Search by invoice number
     if (req.query.search) {
-      query.invoiceNumber = { $regex: req.query.search, $options: 'i' };
+      query.invoice_number = { $regex: req.query.search, $options: 'i' }; // ✅ FIX: Use snake_case
     }
 
     logger.info('invoice:getAllInvoices:start', {
@@ -203,8 +189,8 @@ exports.getAllInvoices = async (req, res, next) => {
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
-        .populate('userId', 'name email')
-        .populate('orderId', 'order_number')
+        .populate('user_id', 'name email') // ✅ FIX: Use snake_case
+        .populate('order_id', 'order_number') // ✅ FIX: Use snake_case
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -212,25 +198,48 @@ exports.getAllInvoices = async (req, res, next) => {
       Invoice.countDocuments(query),
     ]);
 
+    // ✅ STANDARDIZED: All fields use snake_case matching Invoice model
     const formattedInvoices = invoices.map(inv => ({
       id: inv._id.toString(),
-      invoiceNumber: inv.invoiceNumber,
-      orderId: inv.orderId?._id?.toString(),
-      order_id: inv.order_id || inv.orderId?._id?.toString(),
-      orderNumber: inv.orderId?.order_number,
-      userId: inv.userId?._id?.toString(),
-      userName: inv.userId?.name,
-      userEmail: inv.userId?.email,
-      total: inv.total,
+      invoice_number: inv.invoice_number,
+      user_id: inv.user_id?._id?.toString() || inv.user_id?.toString(),
+      order_id: inv.order_id?._id?.toString() || inv.order_id?.toString(),
+      
+      // User details (from populate)
+      user_name: inv.user_id?.name,
+      user_email: inv.user_id?.email,
+      
+      // Amounts - all snake_case
       subtotal: inv.subtotal,
-      tax: inv.tax,
-      discount: inv.discount,
-      issueDate: inv.issueDate,
-      dueDate: inv.dueDate,
-      paymentStatus: inv.paymentStatus,
+      discount_amount: inv.discount_amount || 0,
+      coupon_discount: inv.coupon_discount || 0,
+      gift_price: inv.gift_price || 0,
+      delivery_charges: inv.delivery_charges || 0,
+      tax_amount: inv.tax_amount || 0,
+      total_amount: inv.total_amount,
+      
+      // Dates
+      issue_date: inv.issue_date,
+      due_date: inv.due_date,
+      
+      // Payment info
+      payment_status: inv.payment_status,
+      payment_method: inv.payment_method,
+      payment_date: inv.payment_date,
+      
+      // Razorpay info
+      razorpay_payment_id: inv.razorpay_payment_id,
+      razorpay_order_id: inv.razorpay_order_id,
+      
+      // Sale type
+      sale_type: inv.sale_type,
+      
+      // Status
       status: inv.status,
-      createdAt: inv.createdAt,
-      updatedAt: inv.updatedAt,
+      
+      // Timestamps
+      created_at: inv.createdAt,
+      updated_at: inv.updatedAt,
     }));
 
     logger.info('invoice:getAllInvoices:success', {
@@ -269,7 +278,7 @@ exports.getUserInvoices = async (req, res, next) => {
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const skip = (page - 1) * limit;
 
-    const query = { userId };
+    const query = { user_id: userId }; // ✅ FIX: Use snake_case field name
 
     logger.info('invoice:getUserInvoices:start', {
       userId,
@@ -279,7 +288,7 @@ exports.getUserInvoices = async (req, res, next) => {
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
-        .populate('orderId', 'order_number')
+        .populate('order_id', 'order_number') // ✅ FIX: Use snake_case
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -287,20 +296,40 @@ exports.getUserInvoices = async (req, res, next) => {
       Invoice.countDocuments(query),
     ]);
 
+    // ✅ STANDARDIZED: All fields use snake_case matching Invoice model
     const formattedInvoices = invoices.map(inv => ({
       id: inv._id.toString(),
-      invoiceNumber: inv.invoiceNumber,
-      orderId: inv.orderId?._id?.toString(),
-      orderNumber: inv.orderId?.order_number,
-      total: inv.total,
+      invoice_number: inv.invoice_number,
+      user_id: inv.user_id?.toString(),
+      order_id: inv.order_id?._id?.toString() || inv.order_id?.toString(),
+      
+      // Amounts - all snake_case
       subtotal: inv.subtotal,
-      tax: inv.tax,
-      discount: inv.discount,
-      issueDate: inv.issueDate,
-      dueDate: inv.dueDate,
-      paymentStatus: inv.paymentStatus,
+      discount_amount: inv.discount_amount || 0,
+      coupon_discount: inv.coupon_discount || 0,
+      gift_price: inv.gift_price || 0,
+      delivery_charges: inv.delivery_charges || 0,
+      tax_amount: inv.tax_amount || 0,
+      total_amount: inv.total_amount,
+      
+      // Dates
+      issue_date: inv.issue_date,
+      due_date: inv.due_date,
+      
+      // Payment info
+      payment_status: inv.payment_status,
+      payment_method: inv.payment_method,
+      payment_date: inv.payment_date,
+      
+      // Sale type
+      sale_type: inv.sale_type,
+      
+      // Status
       status: inv.status,
-      createdAt: inv.createdAt,
+      
+      // Timestamps
+      created_at: inv.createdAt,
+      updated_at: inv.updatedAt,
     }));
 
     res.json({
@@ -427,8 +456,8 @@ exports.downloadInvoicePDF = async (req, res, next) => {
     });
 
     const invoice = await Invoice.findById(invoiceId)
-      .populate('userId', 'name email phone')
-      .populate('orderId')
+      .populate('user_id', 'name email phone') // ✅ FIX: Use snake_case
+      .populate('order_id') // ✅ FIX: Use snake_case
       .lean();
 
     if (!invoice) {
@@ -442,7 +471,7 @@ exports.downloadInvoicePDF = async (req, res, next) => {
     }
 
     // Check permissions
-    if (userRole !== 'admin' && invoice.userId._id.toString() !== userId.toString()) {
+    if (userRole !== 'admin' && invoice.user_id._id.toString() !== userId.toString()) { // ✅ FIX: Use snake_case
       return res.status(403).json({
         success: false,
         message: 'Access denied',
@@ -452,37 +481,49 @@ exports.downloadInvoicePDF = async (req, res, next) => {
     // Get company settings (dynamic data from admin dashboard)
     const companySettings = await CompanySettings.findOne().lean();
 
-    // Prepare invoice data for PDF
+    // ✅ FIX: Prepare invoice data for PDF with correct field names
     const invoiceData = {
-      invoiceNumber: invoice.invoiceNumber,
-      orderId: invoice.orderId?._id?.toString(),
-      order_id: invoice.order_id || invoice.orderId?._id?.toString(),
-      orderNumber: invoice.orderId?.order_number,
-      userName: invoice.userId?.name,
-      userEmail: invoice.userId?.email,
-      items: invoice.items,
-      subtotal: invoice.subtotal,
-      tax: invoice.tax,
-      discount: invoice.discount,
-      discount_amount: invoice.discount,
+      // Invoice details - use snake_case from database
+      invoice_number: invoice.invoice_number,
+      order_id: invoice.order_id?._id?.toString() || invoice.order_id?.toString(),
+      
+      // User details - from populated user_id
+      user_name: invoice.user_id?.name || 'N/A',
+      user_email: invoice.user_id?.email || 'N/A',
+      user_phone: invoice.user_id?.phone || 'N/A',
+      
+      // Items
+      items: invoice.items || [],
+      
+      // Amounts - all from database (don't recalculate!)
+      subtotal: invoice.subtotal || 0,
+      discount_amount: invoice.discount_amount || 0,
       coupon_discount: invoice.coupon_discount || 0,
       gift_price: invoice.gift_price || 0,
-      shippingCharges: invoice.shippingCharges,
-      shipping_charges: invoice.shippingCharges,
       delivery_charges: invoice.delivery_charges || 0,
-      gst_amount: invoice.gst_amount || 0,
-      total: invoice.total,
-      issueDate: invoice.issueDate,
-      dueDate: invoice.dueDate,
-      paymentStatus: invoice.paymentStatus,
-      paymentMethod: invoice.paymentMethod,
-      paymentDate: invoice.paymentDate,
+      tax_amount: invoice.tax_amount || 0,  // ✅ Use stored tax, don't recalculate
+      total_amount: invoice.total_amount || 0,
+      
+      // Dates - use snake_case from database
+      issue_date: invoice.issue_date,
+      due_date: invoice.due_date,
+      
+      // Payment info
+      payment_status: invoice.payment_status,
+      payment_method: invoice.payment_method,
+      payment_date: invoice.payment_date,
       razorpay_payment_id: invoice.razorpay_payment_id,
       razorpay_order_id: invoice.razorpay_order_id,
+      
+      // Sale type and UPI
       sale_type: invoice.sale_type,
       upi_qr_code: invoice.upi_qr_code,
-      billingAddress: invoice.billingAddress,
-      shippingAddress: invoice.shippingAddress,
+      
+      // Addresses - use snake_case from database
+      billing_address: invoice.billing_address,
+      shipping_address: invoice.shipping_address,
+      
+      // Additional
       notes: invoice.notes,
       terms: invoice.terms,
     };
@@ -519,7 +560,7 @@ exports.downloadInvoicePDF = async (req, res, next) => {
 
     // Set response headers
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${invoice.invoice_number}.pdf"`); // ✅ FIX: Use snake_case
     res.setHeader('Content-Length', pdfBuffer.length);
 
     // Send PDF
@@ -546,12 +587,15 @@ exports.downloadInvoicePDF = async (req, res, next) => {
 exports.updateInvoiceStatus = async (req, res, next) => {
   try {
     const invoiceId = req.params.id;
-    const { status, paymentStatus } = req.body;
+    const { status, payment_status, paymentStatus } = req.body;
+
+    // Accept both snake_case and camelCase for backward compatibility
+    const newPaymentStatus = payment_status || paymentStatus;
 
     logger.info('invoice:updateStatus:start', {
       invoiceId,
       status,
-      paymentStatus,
+      payment_status: newPaymentStatus,
     });
 
     const invoice = await Invoice.findById(invoiceId);
@@ -570,10 +614,10 @@ exports.updateInvoiceStatus = async (req, res, next) => {
       invoice.status = status;
     }
 
-    if (paymentStatus) {
-      invoice.paymentStatus = paymentStatus;
-      if (paymentStatus === 'paid' && !invoice.paymentDate) {
-        invoice.paymentDate = new Date();
+    if (newPaymentStatus) {
+      invoice.payment_status = newPaymentStatus;
+      if (newPaymentStatus === 'paid' && !invoice.payment_date) {
+        invoice.payment_date = new Date();
       }
     }
 
@@ -582,7 +626,7 @@ exports.updateInvoiceStatus = async (req, res, next) => {
     logger.info('invoice:updateStatus:success', {
       invoiceId,
       status: invoice.status,
-      paymentStatus: invoice.paymentStatus,
+      payment_status: invoice.payment_status,
     });
 
     res.json({
@@ -591,11 +635,16 @@ exports.updateInvoiceStatus = async (req, res, next) => {
       data: {
         id: invoice._id.toString(),
         status: invoice.status,
-        paymentStatus: invoice.paymentStatus,
-        paymentDate: invoice.paymentDate,
+        payment_status: invoice.payment_status,
+        payment_date: invoice.payment_date,
       },
     });
   } catch (error) {
+    logger.error('invoice:updateStatus:error', {
+      message: error.message,
+      stack: error.stack,
+      invoiceId: req.params.id,
+    });
     next(error);
   }
 };
@@ -680,13 +729,13 @@ exports.getPendingOfflineInvoices = async (req, res, next) => {
     // Query for offline sales with pending payment
     const query = {
       sale_type: 'offline',
-      paymentStatus: 'pending',
+      payment_status: 'pending', // ✅ FIX: Use snake_case
     };
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
-        .populate('userId', 'name email phone')
-        .populate('orderId', 'order_number')
+        .populate('user_id', 'name email phone') // ✅ FIX: Use snake_case
+        .populate('order_id', 'order_number') // ✅ FIX: Use snake_case
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
@@ -694,29 +743,50 @@ exports.getPendingOfflineInvoices = async (req, res, next) => {
       Invoice.countDocuments(query),
     ]);
 
+    // ✅ STANDARDIZED: All fields use snake_case matching Invoice model
     const formattedInvoices = invoices.map(inv => ({
       id: inv._id.toString(),
-      invoiceNumber: inv.invoiceNumber,
-      orderId: inv.orderId?._id?.toString(),
-      orderNumber: inv.orderId?.order_number,
-      userId: inv.userId?._id?.toString(),
-      userName: inv.userId?.name,
-      userEmail: inv.userId?.email,
-      userPhone: inv.userId?.phone,
-      total: inv.total,
+      invoice_number: inv.invoice_number,
+      user_id: inv.user_id?._id?.toString() || inv.user_id?.toString(),
+      order_id: inv.order_id?._id?.toString() || inv.order_id?.toString(),
+      
+      // User details (from populate)
+      user_name: inv.user_id?.name,
+      user_email: inv.user_id?.email,
+      user_phone: inv.user_id?.phone,
+      
+      // Amounts - all snake_case
       subtotal: inv.subtotal,
-      tax: inv.tax,
-      discount: inv.discount,
-      issueDate: inv.issueDate,
-      dueDate: inv.dueDate,
-      paymentStatus: inv.paymentStatus,
+      discount_amount: inv.discount_amount || 0,
+      coupon_discount: inv.coupon_discount || 0,
+      gift_price: inv.gift_price || 0,
+      delivery_charges: inv.delivery_charges || 0,
+      tax_amount: inv.tax_amount || 0,
+      total_amount: inv.total_amount,
+      
+      // Dates
+      issue_date: inv.issue_date,
+      due_date: inv.due_date,
+      
+      // Payment info
+      payment_status: inv.payment_status,
+      payment_method: inv.payment_method,
+      payment_date: inv.payment_date,
+      
+      // Sale type and UPI
       sale_type: inv.sale_type,
       upi_id: inv.upi_id,
+      upi_qr_code: inv.upi_qr_code,
+      
+      // Status
       status: inv.status,
-      createdAt: inv.createdAt,
-      updatedAt: inv.updatedAt,
+      
+      // Timestamps
+      created_at: inv.createdAt,
+      updated_at: inv.updatedAt,
+      
       // Calculate days pending
-      daysPending: Math.floor((new Date() - new Date(inv.createdAt)) / (1000 * 60 * 60 * 24)),
+      days_pending: Math.floor((new Date() - new Date(inv.createdAt)) / (1000 * 60 * 60 * 24)),
     }));
 
     res.json({
@@ -767,12 +837,12 @@ exports.markOfflineInvoicePaid = async (req, res, next) => {
       });
     }
 
-    // Update invoice status
-    invoice.paymentStatus = 'paid';
+    // ✅ Update invoice status - use snake_case fields
+    invoice.payment_status = 'paid';
     invoice.status = 'paid';
-    invoice.paymentDate = new Date();
+    invoice.payment_date = new Date();
     if (paymentMethod) {
-      invoice.paymentMethod = paymentMethod;
+      invoice.payment_method = paymentMethod;
     }
     if (paymentNotes) {
       invoice.notes = `${invoice.notes}\n\nPayment Notes: ${paymentNotes}`;
@@ -782,7 +852,7 @@ exports.markOfflineInvoicePaid = async (req, res, next) => {
 
     logger.info('invoice:markOfflinePaid:success', {
       invoiceId,
-      paymentStatus: invoice.paymentStatus,
+      payment_status: invoice.payment_status,
       status: invoice.status,
     });
 
@@ -791,10 +861,10 @@ exports.markOfflineInvoicePaid = async (req, res, next) => {
       message: 'Invoice marked as paid successfully',
       data: {
         id: invoice._id.toString(),
-        invoiceNumber: invoice.invoiceNumber,
-        paymentStatus: invoice.paymentStatus,
+        invoice_number: invoice.invoice_number,
+        payment_status: invoice.payment_status,
         status: invoice.status,
-        paymentDate: invoice.paymentDate,
+        payment_date: invoice.payment_date,
       },
     });
   } catch (error) {

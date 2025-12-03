@@ -288,20 +288,27 @@ exports.getPaymentById = async (req, res, next) => {
       });
     }
 
-    // Format response
+    // ✅ STANDARDIZED: Format response with all Payment model fields in snake_case
     const formattedPayment = {
       id: payment._id.toString(),
       order_id: payment.order_id._id.toString(),
+      user_id: payment.user_id.toString(),
       razorpay_order_id: payment.razorpay_order_id,
       razorpay_payment_id: payment.razorpay_payment_id,
+      razorpay_signature: payment.razorpay_signature,
       amount: payment.amount,
       currency: payment.currency,
       status: payment.status,
       payment_method: payment.payment_method,
       payment_email: payment.payment_email,
       payment_contact: payment.payment_contact,
+      refund_id: payment.refund_id,
       refund_amount: payment.refund_amount,
       refund_status: payment.refund_status,
+      sale_type: payment.sale_type,
+      error_code: payment.error_code,
+      error_description: payment.error_description,
+      metadata: payment.metadata,
       created_at: payment.createdAt,
       updated_at: payment.updatedAt,
     };
@@ -342,17 +349,27 @@ exports.getMyPayments = async (req, res, next) => {
       Payment.countDocuments(query),
     ]);
 
+    // ✅ STANDARDIZED: Format payments with all Payment model fields in snake_case
     const formattedPayments = payments.map((payment) => ({
       id: payment._id.toString(),
       order_id: payment.order_id?._id?.toString(),
+      user_id: payment.user_id?.toString(),
       razorpay_order_id: payment.razorpay_order_id,
       razorpay_payment_id: payment.razorpay_payment_id,
+      razorpay_signature: payment.razorpay_signature,
       amount: payment.amount,
       currency: payment.currency,
       status: payment.status,
       payment_method: payment.payment_method,
+      payment_email: payment.payment_email,
+      payment_contact: payment.payment_contact,
+      refund_id: payment.refund_id,
       refund_amount: payment.refund_amount,
       refund_status: payment.refund_status,
+      sale_type: payment.sale_type,
+      error_code: payment.error_code,
+      error_description: payment.error_description,
+      metadata: payment.metadata,
       created_at: payment.createdAt,
       updated_at: payment.updatedAt,
       order: payment.order_id
