@@ -92,6 +92,29 @@ const sendOTPEmail = async (email, otp, type) => {
         </div>
       `;
       break;
+
+    case 'email_verification':
+      subject = 'Verify Your Email Address - E-commerce';
+      htmlContent = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Email Verification Required</h2>
+          <p>You have updated your email address. Please verify your new email by entering the following OTP:</p>
+          <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0;">
+            <h1 style="color: #9C27B0; letter-spacing: 5px; margin: 0;">${otp}</h1>
+          </div>
+          <p>This OTP will expire in ${process.env.OTP_EXPIRE_MINUTES || 10} minutes.</p>
+          <p>Enter this code in your profile page to verify your email address.</p>
+          <div style="background-color: #f0f4ff; padding: 15px; border-left: 4px solid #2196F3; margin: 20px 0;">
+            <p style="margin: 0; color: #1565C0;">
+              <strong>Important:</strong> Verifying your email ensures account security and helps you recover your account if needed.
+            </p>
+          </div>
+          <p>If you didn't update your email, please contact support immediately.</p>
+          <hr style="border: 1px solid #eee; margin: 20px 0;">
+          <p style="color: #999; font-size: 12px;">This is an automated email. Please do not reply.</p>
+        </div>
+      `;
+      break;
  
     default:
       throw new Error('Invalid OTP type');

@@ -6,11 +6,11 @@ const { generateToken, generateRefreshToken } = require('../middleware/auth');
 
 async function createAdminUser(email, password, name) {
   try {
-    // Connect to database
+    // Connect to database 
     await connectDB();
 
     // Check if admin already exists
-    const existingAdmin = await User.findOne({ email });
+    const existingAdmin = await User.findOne({ email }); 
     if (existingAdmin) {
       console.log('Admin user already exists with this email.');
       process.exit(1);

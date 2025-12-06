@@ -9,6 +9,10 @@ const {
   resendOTP,
   resetPassword,
   profile,
+  updateProfile,
+  changePassword,
+  sendEmailVerification,
+  verifyEmail,
   refreshToken,
 } = require('../controllers/authController');
 const { protect } = require('../middleware/auth');
@@ -362,4 +366,122 @@ router.post('/reset-password', resetPassword);
 *               $ref: '#/components/schemas/ErrorResponse'
 */
 router.get('/profile/:userId', profile);
+
+/**
+* @swagger
+* /api/auth/profile/{userId}:
+*   put:
+*     summary: Update user profile
+*     tags: [Authentication]
+*     security:
+*       - bearerAuth: []
+*     parameters:
+*       - in: path
+*         name: userId
+*         required: true
+*         schema:
+*           type: string
+*         description: User ID
+*     requestBody:
+*       required: true
+*       content:
+*         application/json:
+*           schema:
+*             type: object
+*             properties:
+*               name:
+*                 type: string
+*                 example: John Doe
+*               phone:
+*                 type: string
+*                 example: +1234567890
+*               email:
+*                 type: string
+*                 example: john@example.com
+*     responses:
+*       200:
+*         description: Profile updated successfully
+*       401:
+*         description: Not authorized
+*       403:
+*         description: Forbidden - can only update own profile
+*/
+router.put('/profile/:userId', protect, updateProfile);
+
+/**
+* @swagger
+* /api/auth/change-password:
+*   put:
+*     summary: Change user password
+*     tags: [Authentication]
+*     security:
+*       - bearerAuth: []
+*     requestBody:
+*       required: true
+*       content:
+*         application/json:
+*           schema:
+*             type: object
+*             required:
+*               - currentPassword
+*               - newPassword
+*             properties:
+*               currentPassword:
+*                 type: string
+*                 example: oldPassword123
+*               newPassword:
+*                 type: string
+*                 example: newPassword123
+*     responses:
+*       200:
+*         description: Password changed successfully
+*       401:
+*         description: Current password is incorrect
+*/
+router.put('/change-password', protect, changePassword);
+
+/**
+* @swagger
+* /api/auth/send-email-verification:
+*   post:
+*     summary: Send email verification OTP
+*     tags: [Authentication]
+*     security:
+*       - bearerAuth: []
+*     responses:
+*       200:
+*         description: Verification email sent successfully
+*       400:
+*         description: Email is already verified
+*/
+router.post('/send-email-verification', protect, sendEmailVerification);
+
+/**
+* @swagger
+* /api/auth/verify-email:
+*   post:
+*     summary: Verify email with OTP
+*     tags: [Authentication]
+*     security:
+*       - bearerAuth: []
+*     requestBody:
+*       required: true
+*       content:
+*         application/json:
+*           schema:
+*             type: object
+*             required:
+*               - otp
+*             properties:
+*               otp:
+*                 type: string
+*                 example: "123456"
+*     responses:
+*       200:
+*         description: Email verified successfully
+*       400:
+*         description: Invalid or expired OTP
+*/
+router.post('/verify-email', protect, verifyEmail);
+
 module.exports = router;

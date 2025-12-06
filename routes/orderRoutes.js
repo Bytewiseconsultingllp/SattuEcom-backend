@@ -312,7 +312,7 @@ router.patch('/:id/status', updateOrderStatus);
 * @swagger
 * /api/orders/{id}/cancel:
 *   patch:
-*     summary: Cancel order (only pending or processing orders)
+*     summary: Cancel order (DISABLED - Orders cannot be cancelled)
 *     tags: [Orders]
 *     security:
 *       - bearerAuth: []
@@ -324,8 +324,8 @@ router.patch('/:id/status', updateOrderStatus);
 *           type: string
 *         description: Order ID
 *     responses:
-*       200:
-*         description: Order cancelled successfully
+*       403:
+*         description: Order cancellation is not allowed
 *         content:
 *           application/json:
 *             schema:
@@ -333,18 +333,13 @@ router.patch('/:id/status', updateOrderStatus);
 *               properties:
 *                 success:
 *                   type: boolean
-*                 data:
-*                   $ref: '#/components/schemas/Order'
 *                 message:
 *                   type: string
-*       400:
-*         description: Cannot cancel order with current status
-*       404:
-*         description: Order not found
 *       401:
 *         description: Unauthorized
 */
-router.patch('/:id/cancel', cancelOrder);
+// DISABLED: Orders cannot be cancelled once placed
+// router.patch('/:id/cancel', cancelOrder);
  
 module.exports = router;
  

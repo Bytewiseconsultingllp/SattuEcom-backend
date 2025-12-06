@@ -1117,9 +1117,18 @@ exports.getAllOrders = async (req, res, next) => {
 };
 
 /**
- * Cancel order (user can only cancel their own pending orders)
+ * Cancel order (DISABLED - Orders cannot be cancelled once placed)
+ * This function is kept for reference but the route is disabled
  */
 exports.cancelOrder = async (req, res, next) => {
+  // Return error - cancellation is disabled
+  return res.status(403).json({
+    success: false,
+    message: 'Order cancellation is not allowed. Once an order is placed, it cannot be cancelled. Please contact customer support for assistance.'
+  });
+  
+  /* ORIGINAL CODE COMMENTED OUT
+  // This code is disabled - orders cannot be cancelled
   try {
     const userId = req.user._id;
     const orderId = req.params.id;
@@ -1257,4 +1266,5 @@ exports.cancelOrder = async (req, res, next) => {
     });
     next(error);
   }
+  */ // END COMMENTED CODE - Cancellation disabled
 };

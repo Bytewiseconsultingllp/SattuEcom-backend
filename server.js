@@ -34,6 +34,8 @@ const contactQueryRoutes = require('./routes/contactQueryRoutes');
 const dashboardRoutes = require('./routes/dashboardRoutes');
 const uploadRoutes = require('./routes/uploadRoutes');
 const invoiceRoutes = require('./routes/invoiceRoutes');
+const reportRoutes = require('./routes/reportRoutes');
+const customReportRoutes = require('./routes/customReportRoutes');
 
 // Initialize express app
 const app = express();
@@ -181,6 +183,13 @@ app.use("/api/upload", uploadRoutes);
 
 // Invoice routes
 app.use("/api/invoices", invoiceRoutes);
+
+// Custom Report routes (Government-ready reports with charts)
+// IMPORTANT: This must come BEFORE the general reports route
+app.use("/api/admin/reports/custom", customReportRoutes);
+
+// Report routes (NEW)
+app.use("/api/admin/reports", reportRoutes);
 
 // Health check
 app.use("/health", healthRoutes);

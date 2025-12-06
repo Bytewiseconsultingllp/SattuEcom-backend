@@ -650,6 +650,304 @@ const profile = async (req, res) => {
     });
   }
 };
+
+/**
+ * @desc    Update user profile
+ * @route   PUT /api/auth/profile/:userId
+ * @access  Private
+ */
+const updateProfile = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { name, phone, email } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'User ID is required in URL params'
+      });
+    }
+
+    // Verify the requesting user is updating their own profile (or is admin)
+    if (req.user._id.toString() !== userId && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'You can only update your own profile'
+      });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if email is being changed and if it's already taken
+    if (email && email !== user.email) {
+      const emailExists = await User.findOne({ email, _id: { $ne: userId } });
+      if (emailExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email already in use by another account'
+        });
+      }
+      
+      // Store old email before changing
+      const oldEmail = user.email;
+      user.email = email;
+      // If email changes, mark as unverified
+      user.isVerified = false;
+      
+      // Send verification email after save
+      await user.save();
+      
+      // Generate OTP for email verification
+      const otp = generateOTP();
+      const otpExpiry = new Date(Date.now() + (process.env.OTP_EXPIRE_MINUTES || 10) * 60 * 1000);
+      
+      // Delete any existing verification OTPs for this email
+      await OTP.deleteMany({ email, type: 'email_verification' });
+      
+      // Save new OTP
+      await OTP.create({
+        email,
+        otp,
+        type: 'email_verification',
+        expiresAt: otpExpiry,
+      });
+      
+      // Send verification email
+      try {
+        await sendOTPEmail(email, otp, 'email_verification');
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+        // Don't fail the profile update if email sending fails
+      }
+    }
+
+    // Update allowed fields
+    if (name) user.name = name;
+    if (phone) user.phone = phone;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Profile updated successfully',
+      data: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        isVerified: user.isVerified,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server error',
+    });
+  }
+};
+
+/**
+ * @desc    Change user password
+ * @route   PUT /api/auth/change-password
+ * @access  Private
+ */
+const changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user._id;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide current password and new password'
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters'
+      });
+    }
+
+    const user = await User.findById(userId).select('+password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isPasswordMatch = await user.matchPassword(currentPassword);
+    if (!isPasswordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Update password
+    user.password = newPassword;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server error'
+    });
+  }
+};
+
+/**
+ * @desc    Send email verification OTP
+ * @route   POST /api/auth/send-email-verification
+ * @access  Private
+ */
+const sendEmailVerification = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already verified'
+      });
+    }
+
+    // Generate OTP
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + (process.env.OTP_EXPIRE_MINUTES || 10) * 60 * 1000);
+
+    // Delete any existing verification OTPs for this email
+    await OTP.deleteMany({ email: user.email, type: 'email_verification' });
+
+    // Save new OTP
+    await OTP.create({
+      email: user.email,
+      otp,
+      type: 'email_verification',
+      expiresAt: otpExpiry,
+    });
+
+    // Send verification email
+    await sendOTPEmail(user.email, otp, 'email_verification');
+
+    res.status(200).json({
+      success: true,
+      message: 'Verification email sent successfully',
+      data: {
+        email: user.email,
+        expiresIn: `${process.env.OTP_EXPIRE_MINUTES || 10} minutes`,
+      },
+    });
+  } catch (error) {
+    console.error('Send email verification error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to send verification email'
+    });
+  }
+};
+
+/**
+ * @desc    Verify email with OTP
+ * @route   POST /api/auth/verify-email
+ * @access  Private
+ */
+const verifyEmail = async (req, res) => {
+  try {
+    const { otp } = req.body;
+    const userId = req.user._id;
+
+    if (!otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide OTP'
+      });
+    }
+
+    const user = await User.findById(userId);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is already verified'
+      });
+    }
+
+    // Find OTP
+    const otpRecord = await OTP.findOne({
+      email: user.email,
+      otp,
+      type: 'email_verification',
+      isUsed: false,
+      expiresAt: { $gt: Date.now() },
+    });
+
+    if (!otpRecord) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired OTP'
+      });
+    }
+
+    // Mark user as verified
+    user.isVerified = true;
+    await user.save();
+
+    // Mark OTP as used
+    otpRecord.isUsed = true;
+    await otpRecord.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Email verified successfully',
+      data: {
+        id: user._id,
+        email: user.email,
+        isVerified: user.isVerified,
+      },
+    });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to verify email'
+    });
+  }
+};
  
 module.exports = {
   register,
@@ -660,5 +958,9 @@ module.exports = {
   resetPassword,
   resendOTP,
   profile,
+  updateProfile,
+  changePassword,
+  sendEmailVerification,
+  verifyEmail,
   refreshToken,
 };
