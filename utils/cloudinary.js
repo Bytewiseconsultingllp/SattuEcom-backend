@@ -14,7 +14,7 @@ cloudinary.config({
  * @param {object} options - Additional upload options
  * @returns {Promise<object>} - Upload result with URL
  */
-const uploadImage = async (base64Image, folder = 'sattu-ecom', options = {}) => {
+const uploadImage = async (base64Image, folder = 'Grain-fusion', options = {}) => {
   try {
     // Ensure base64 string has proper format
     let imageData = base64Image;
@@ -55,7 +55,7 @@ const uploadImage = async (base64Image, folder = 'sattu-ecom', options = {}) => 
  * @param {object} options - Additional upload options
  * @returns {Promise<Array<object>>} - Array of upload results
  */
-const uploadMultipleImages = async (base64Images, folder = 'sattu-ecom', options = {}) => {
+const uploadMultipleImages = async (base64Images, folder = 'Grain-fusion', options = {}) => {
   try {
     const uploadPromises = base64Images.map(image => uploadImage(image, folder, options));
     const results = await Promise.all(uploadPromises);

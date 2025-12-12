@@ -43,10 +43,10 @@ const sendOTPEmail = async (email, otp, type) => {
  
   switch (type) {
     case 'registration':
-      subject = 'Verify Your Email - E-commerce';
+      subject = 'Verify Your Email - Grain Fusion';
       htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h2 style="color: #333;">Welcome to E-commerce!</h2>
+          <h2 style="color: #333;">Welcome to Grain Fusion!</h2>
           <p>Thank you for registering. Please use the following OTP to verify your email:</p>
           <div style="background-color: #f4f4f4; padding: 20px; text-align: center; margin: 20px 0;">
             <h1 style="color: #4CAF50; letter-spacing: 5px; margin: 0;">${otp}</h1>
@@ -60,7 +60,7 @@ const sendOTPEmail = async (email, otp, type) => {
       break;
  
     case 'login':
-      subject = 'Login Verification - E-commerce';
+      subject = 'Login Verification - Grain Fusion';
       htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">Login Verification</h2>
@@ -77,7 +77,7 @@ const sendOTPEmail = async (email, otp, type) => {
       break;
  
     case 'password_reset':
-      subject = 'Password Reset Request - E-commerce';
+      subject = 'Password Reset Request - Grain Fusion';
       htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">Password Reset Request</h2>
@@ -94,7 +94,7 @@ const sendOTPEmail = async (email, otp, type) => {
       break;
 
     case 'email_verification':
-      subject = 'Verify Your Email Address - E-commerce';
+      subject = 'Verify Your Email Address - Grain Fusion';
       htmlContent = `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
           <h2 style="color: #333;">Email Verification Required</h2>
@@ -121,7 +121,7 @@ const sendOTPEmail = async (email, otp, type) => {
   }
  
   const mailOptions = {
-    from: `"${process.env.SMTP_FROM_NAME || 'E-commerce'}" <${process.env.SMTP_USER}>`,
+    from: `"${process.env.SMTP_FROM_NAME || 'Grain Fusion'}" <${process.env.SMTP_USER}>`,
     to: email,
     subject: subject,
     html: htmlContent,
@@ -190,11 +190,11 @@ function renderOrderHtml(order, extra = '') {
 }
 
 async function sendMailSafe({ to, subject, html }) {
-  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
+  const fromName = process.env.SMTP_FROM_NAME || 'Grain Fusion';
   const from = `"${fromName}" <${process.env.SMTP_USER}>`;
   try {
     logger.debug('sending email', { to, subject });
-    const info = await transporter.sendMail({ from, to, subject, html, headers: { 'X-Mailer': 'SattuEcom' } });
+    const info = await transporter.sendMail({ from, to, subject, html, headers: { 'X-Mailer': 'Grain Fusion' } });
     logger.info('email sent', { to, subject, messageId: info.messageId, response: info.response });
     return true;
   } catch (error) {
@@ -331,8 +331,8 @@ async function sendPasswordResetEmail(email, name) {
 }
 
 // Optional: simple test helper to verify SMTP to any target inbox
-async function sendTestEmail(to, subject = 'SMTP Test', text = 'This is a test email from SattuEcom') {
-  const fromName = process.env.SMTP_FROM_NAME || 'E-commerce';
+async function sendTestEmail(to, subject = 'SMTP Test', text = 'This is a test email from Grain Fusion') {
+  const fromName = process.env.SMTP_FROM_NAME || 'Grain Fusion';
   const from = `"${fromName}" <${process.env.SMTP_USER}>`;
   return transporter.sendMail({ from, to, subject, text });
 }

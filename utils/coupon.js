@@ -117,18 +117,15 @@ function computeDiscount(cartItems, coupon) {
       discount = Math.min(discount, coupon.max_discount_amount);
     }
   } else if (coupon.type === 'buy_x_get_y') {
-    // Buy X Get Y Free: only applies to SAME product (not mixed items)
-    // Group eligible items by product_id
-    const productGroups = getItemsByProduct(eligible);
-    
+    // Buy X Get Y Free: applies to ANY product with sufficient quantity
     if (coupon.buy_quantity && coupon.get_quantity) {
-      // For each product group, calculate free items
-      for (const group of productGroups) {
-        const totalQty = group.totalQty;
-        const itemPrice = group.price;
+      // Check each eligible cart item individually
+      for (const item of eligible) {
+        const itemQty = Number(item.quantity || 0);
+        const itemPrice = Number(item.price || 0);
         
-        // Calculate how many free items for this product
-        const freeItemsCount = Math.floor(totalQty / (coupon.buy_quantity + coupon.get_quantity)) * coupon.get_quantity;
+        // Calculate how many free items for this specific cart item
+        const freeItemsCount = Math.floor(itemQty / (coupon.buy_quantity + coupon.get_quantity)) * coupon.get_quantity;
         
         // Discount = free items * price
         discount += freeItemsCount * itemPrice;

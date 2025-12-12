@@ -13,7 +13,7 @@ exports.getCartItems = async (req, res, next) => {
     const items = await CartItem.find({ user_id: userId })
       .populate({
         path: 'product_id',
-        select: 'name price images in_stock createdAt updatedAt',
+        select: 'name price images in_stock description category createdAt updatedAt',
       })
       .sort({ created_at: -1 })
       .lean();
@@ -38,6 +38,8 @@ exports.getCartItems = async (req, res, next) => {
         price: it.product_id.price,
         images: it.product_id.images,
         in_stock: it.product_id.in_stock,
+        description: it.product_id.description,
+        category: it.product_id.category,
         created_at: it.product_id.createdAt,
         updated_at: it.product_id.updatedAt,
       },
@@ -78,7 +80,10 @@ exports.addToCart = async (req, res, next) => {
       await cartItem.save();
       
       // Populate product details
-      await cartItem.populate('product_id');
+      await cartItem.populate({
+        path: 'product_id',
+        select: 'name price images in_stock description category createdAt updatedAt',
+      });
     } else {
       // Create new cart item
       cartItem = await CartItem.create({
@@ -88,7 +93,10 @@ exports.addToCart = async (req, res, next) => {
       });
       
       // Populate product details
-      await cartItem.populate('product_id');
+      await cartItem.populate({
+        path: 'product_id',
+        select: 'name price images in_stock description category createdAt updatedAt',
+      });
     }
  
     // Format response to match Supabase structure
@@ -150,7 +158,10 @@ exports.updateCartItemQuantity = async (req, res, next) => {
  
     cartItem.quantity = quantity;
     await cartItem.save();
-    await cartItem.populate('product_id');
+    await cartItem.populate({
+      path: 'product_id',
+      select: 'name price images in_stock description category createdAt updatedAt',
+    });
  
     // Format response
     const itemObj = cartItem.toObject();
@@ -242,7 +253,10 @@ exports.getCartSummary = async (req, res, next) => {
   try {
     const userId = req.user._id;
  
-    const cartItems = await CartItem.find({ user_id: userId }).populate('product_id');
+    const cartItems = await CartItem.find({ user_id: userId }).populate({
+      path: 'product_id',
+      select: 'name price images in_stock description category createdAt updatedAt',
+    });
  
     const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
     const totalPrice = cartItems.reduce((sum, item) => {

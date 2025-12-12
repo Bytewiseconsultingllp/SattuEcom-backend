@@ -10,7 +10,7 @@ const { protect } = require('../middleware/auth');
  */
 router.post('/image', protect, async (req, res) => {
   try {
-    const { image, folder = 'sattu-ecom/general' } = req.body;
+    const { image, folder = 'Grain-fusion/general' } = req.body;
 
     if (!image) {
       return res.status(400).json({
@@ -58,7 +58,7 @@ router.post('/image', protect, async (req, res) => {
  */
 router.post('/images', protect, async (req, res) => {
   try {
-    const { images, folder = 'sattu-ecom/general' } = req.body;
+    const { images, folder = 'Grain-fusion/general' } = req.body;
 
     if (!images || !Array.isArray(images) || images.length === 0) {
       return res.status(400).json({
@@ -129,7 +129,7 @@ router.post('/product-images', protect, async (req, res) => {
     }
 
     // Upload to Cloudinary in products folder
-    const results = await uploadMultipleImages(images, 'sattu-ecom/products');
+    const results = await uploadMultipleImages(images, 'Grain-fusion/products');
 
     res.json({
       success: true,
@@ -174,7 +174,7 @@ router.post('/company-logo', protect, async (req, res) => {
     }
 
     // Upload to Cloudinary
-    const result = await uploadImage(image, 'sattu-ecom/company');
+    const result = await uploadImage(image, 'Grain-fusion/company');
 
     res.json({
       success: true,
@@ -219,7 +219,7 @@ router.post('/company-signature', protect, async (req, res) => {
     }
 
     // Upload to Cloudinary
-    const result = await uploadImage(image, 'sattu-ecom/company');
+    const result = await uploadImage(image, 'Grain-fusion/company');
 
     res.json({
       success: true,
@@ -274,7 +274,7 @@ router.post('/review-images', protect, async (req, res) => {
     }
 
     // Upload to Cloudinary
-    const results = await uploadMultipleImages(images, 'sattu-ecom/reviews');
+    const results = await uploadMultipleImages(images, 'Grain-fusion/reviews');
 
     res.json({
       success: true,

@@ -89,6 +89,21 @@ exports.applyCoupon = async (req, res, next) => {
       });
     }
     
+    // Check for buy_x_get_y coupon: ensure at least one cart item has quantity >= buy_quantity + get_quantity
+    if (coupon.type === 'buy_x_get_y') {
+      const minRequired = (coupon.buy_quantity || 0) + (coupon.get_quantity || 0);
+      
+      // Check if ANY single cart item (any product) has at least the minimum required quantity
+      const hasEnoughQuantity = cart_items.some(item => Number(item.quantity || 0) >= minRequired);
+      
+      if (!hasEnoughQuantity) {
+        return res.status(400).json({ 
+          success: false, 
+          message: `This coupon requires at least ${minRequired} quantity of any product in your cart` 
+        });
+      }
+    }
+    
     const cart_total = cart_items.reduce((sum, item) => sum + (Number(item.price) * Number(item.quantity)), 0);
     
     // Check minimum purchase amount

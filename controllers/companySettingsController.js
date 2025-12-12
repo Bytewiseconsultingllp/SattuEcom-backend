@@ -10,9 +10,9 @@ exports.getCompanySettings = async (req, res, next) => {
     // If no settings exist, create default ones
     if (!settings) {
       settings = await CompanySettings.create({
-        companyName: 'Sattu Store',
+        companyName: 'Grain Fusion',
         description: 'Premium quality sattu products',
-        email: 'info@sattustore.com',
+        email: 'siplheakthymix@gmail.com',
         phone: '+91 98765 43210',
         address: '123 Main Street, City, State - 123456',
       });
@@ -56,9 +56,9 @@ exports.updateCompanySettings = async (req, res, next) => {
 
     if (!settings) {
       settings = await CompanySettings.create({
-        companyName: companyName || 'Sattu Store',
+        companyName: companyName || 'Grain Fusion',
         description: description || '',
-        email: email || 'info@sattustore.com',
+        email: email || 'info@grainfusion.com',
         phone: phone || '+91 98765 43210',
         address: address || '',
         gstNumber: gstNumber || '',
