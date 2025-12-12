@@ -7,7 +7,7 @@ const Category = require('../models/Category');
 */
 exports.getProducts = async (req, res, next) => {
   try {
-    const { category, minPrice, maxPrice, inStockOnly, page = 1, limit = 10 } = req.query;
+    const { category, minPrice, maxPrice, inStockOnly, search, page = 1, limit = 10 } = req.query;
  
     // Build query object
     let query = {};
@@ -15,6 +15,14 @@ exports.getProducts = async (req, res, next) => {
     // Category filter
     if (category && category !== 'All Products') {
       query.category = category;
+    }
+ 
+    // Search filter (name or description)
+    if (search && search.trim()) {
+      query.$or = [
+        { name: { $regex: search.trim(), $options: 'i' } },
+        { description: { $regex: search.trim(), $options: 'i' } }
+      ];
     }
  
     // Price range filters
@@ -252,14 +260,19 @@ exports.deleteProduct = async (req, res, next) => {
 /**
 * Get unique categories
 * Helper endpoint to get all product categories
+* Now uses Category collection for consistency with /api/categories
 */
 exports.getCategories = async (req, res, next) => {
   try {
-    const categories = await Product.distinct('category');
+    // Use Category collection instead of Product.distinct() for consistency
+    const categories = await Category.find().sort({ name: 1 }).lean();
+    
+    // Return just the category names as strings (for backward compatibility)
+    const categoryNames = categories.map(c => c.name);
  
     res.status(200).json({
       success: true,
-      data: categories,
+      data: categoryNames,
     });
   } catch (error) {
     next(error);

@@ -127,11 +127,12 @@ router.get('/', getProducts);
 * @swagger
 * /api/products/categories:
 *   get:
-*     summary: Get all unique product categories
+*     summary: Get all product categories (from Category collection)
+*     description: Returns all category names from the Category collection. This ensures consistency with /api/categories endpoint.
 *     tags: [Products]
 *     responses:
 *       200:
-*         description: List of categories
+*         description: List of category names
 *         content:
 *           application/json:
 *             schema:
@@ -139,10 +140,12 @@ router.get('/', getProducts);
 *               properties:
 *                 success:
 *                   type: boolean
+*                   example: true
 *                 data:
 *                   type: array
 *                   items:
 *                     type: string
+*                   example: ["Atta", "Multi Grain Mix", "Pre-mix", "Beverages", "Ready to Drink", "Snacks & Ladoo"]
 */
 router.get('/categories', getCategories);
  
